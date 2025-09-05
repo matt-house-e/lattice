@@ -1,0 +1,9 @@
+Category,Field,Prompt,Instructions,Data_Type,Example_1
+business_analysis,market_size,Estimate the total addressable market size for this company,Provide market size in billions USD and brief reasoning,String,"$50B - Cloud infrastructure market is rapidly growing"
+business_analysis,competition_level,Assess the level of competition in this industry,Rate as Low/Medium/High and provide 1-2 key competitors,String,"High - Competes with AWS Amazon Web Services"
+business_analysis,growth_potential,Evaluate the growth potential for this business,Rate as Low/Medium/High and provide reasoning,String,"High - Cloud adoption accelerating post-pandemic"
+web_intelligence,recent_funding,Search for the latest funding rounds and investment information for this company,Include funding amount series stage and lead investors with sources,String,"$50M Series B led by Accel Partners (TechCrunch 2024)"
+web_intelligence,current_news,Find recent news articles and developments about this company,Summarize 2-3 most recent significant news items with sources,String,"Launched new AI product (Reuters); Partnership with Microsoft (Forbes)"
+web_intelligence,executive_team,Research current leadership team and key executives,List CEO and 2-3 key executives with their backgrounds,String,"CEO: John Smith (ex-Google); CTO: Jane Doe (ex-Meta)"
+web_intelligence,company_valuation,Search for latest company valuation or market cap information,Provide most recent valuation with source and date,String,"Valued at $2.5B in latest Series C (Bloomberg 2024)"
+web_intelligence,market_trends,Research current market trends and industry developments relevant to this company,Identify 2-3 key market trends affecting the company,String,"AI adoption growing 40% YoY; Remote work driving cloud demand"
