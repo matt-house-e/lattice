@@ -20,10 +20,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lattice import TableEnricher, FieldManager, EnrichmentConfig
 from lattice.chains import WebEnrichedLLMChain
+from lattice.utils.logger import setup_logging
 
 
 def main():
     """Demonstrate web-enriched CSV enrichment functionality."""
+    
+    # Set up colored logging for better console output
+    setup_logging(level="INFO", format_type="console", include_timestamp=False)
     
     print("🌐 Testing Web-Enhanced CSV Enrichment Tool")
     print("=" * 60)
@@ -174,6 +178,10 @@ def main():
 
 def quick_test():
     """Quick test of web search functionality without full enrichment."""
+    
+    # Set up logging for quick test
+    setup_logging(level="INFO", format_type="console", include_timestamp=False)
+    
     print("🧪 Quick Web Search Test")
     print("=" * 30)
     

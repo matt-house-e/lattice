@@ -1,11 +1,11 @@
 from typing import List, Dict, Optional, Set
 from dataclasses import dataclass, field
-import logging
 import os
 from .document_processor import DocumentProcessor, DocumentProcessorConfig
 from .vector_store import VectorStore, VectorStoreConfig
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 @dataclass
 class DocumentManagerConfig:

@@ -7,7 +7,6 @@ Provides both LLM-only chains and vector store enhanced chains.
 
 import os
 import json
-import logging
 from typing import Dict, Any, Optional, Union
 from abc import ABC, abstractmethod
 
@@ -16,8 +15,9 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from ..core.exceptions import LLMError, ConfigurationError
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BaseLLMChain(ABC):

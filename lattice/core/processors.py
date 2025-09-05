@@ -5,7 +5,6 @@ Contains the core logic for processing individual rows through enrichment chains
 This is extracted from the original TableEnricher to follow single responsibility principle.
 """
 
-import logging
 from typing import Dict, Any, Optional, Union
 import pandas as pd
 import time
@@ -13,8 +12,9 @@ import asyncio
 
 from .exceptions import EnrichmentError, LLMError
 from .config import EnrichmentConfig
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RowProcessor:

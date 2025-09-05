@@ -222,5 +222,10 @@ htmlcov/
 dist/
 build/
 
-# Data directory - contains test data and generated files
+# Data directory - contains generated files and outputs (not examples)
 data/
+
+# Ignore output files but keep examples
+examples/web_enriched_*.csv
+examples/output_*.csv
+examples/results_*.csv

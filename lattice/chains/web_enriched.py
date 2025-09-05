@@ -7,7 +7,6 @@ for enhanced data enrichment capabilities.
 
 import os
 import json
-import logging
 from typing import Dict, Any, Optional, List, Union
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -15,8 +14,9 @@ from tavily import TavilyClient
 
 from .llm import LLMChain
 from ..core.exceptions import LLMError, ConfigurationError
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WebEnrichedLLMChain(LLMChain):
