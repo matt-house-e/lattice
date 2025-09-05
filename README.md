@@ -7,6 +7,8 @@ A powerful tool for enriching CSV data using Large Language Models (LLM) on a ro
 - **Row-by-row LLM processing** - Processes each CSV row individually with configurable delays
 - **Field-based enrichment** - Define custom fields with specific prompts and data types
 - **Category-based organization** - Group related fields into categories for organized processing
+- **Web-enhanced intelligence** - Real-time web search integration via Tavily API
+- **Modern LLM support** - Uses latest OpenAI models (gpt-4o, gpt-4o-mini) with 8K tokens
 - **Progress tracking** - Real-time progress bars and detailed logging
 - **Configurable LLM settings** - Customizable temperature, token limits, and delays
 - **Error handling** - Robust error handling with graceful fallbacks
@@ -19,7 +21,8 @@ The tool is in a working state with basic LLM enrichment functionality. Vector s
 ## Prerequisites
 
 - Python 3.9+
-- OpenAI API key
+- OpenAI API key (required)
+- Tavily API key (optional, for web search features)
 - Virtual environment (recommended)
 
 ## Installation
@@ -107,6 +110,20 @@ Edit `config.py` to adjust:
 - `temperature`: LLM temperature 0.0-1.0 (default: 0.5)
 - `row_delay`: Delay between processing rows in seconds (default: 2.0)
 - `context_window`: Size of context window for LLM (default: 20000)
+
+## Quick Start
+
+See the `examples/` directory for complete working examples:
+
+- **`examples/field_categories.csv`** - Sample field definitions
+- **`examples/sample_data.csv`** - Test company data  
+- **`examples/test_web_enrichment.py`** - Full demonstration script
+- **`examples/README.md`** - Detailed usage instructions
+
+Run the example:
+```bash
+python examples/test_web_enrichment.py
+```
 
 ## Usage Examples
 

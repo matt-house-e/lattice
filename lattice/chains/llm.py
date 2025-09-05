@@ -7,7 +7,6 @@ Provides both LLM-only chains and vector store enhanced chains.
 
 import os
 import json
-import logging
 from typing import Dict, Any, Optional, Union
 from abc import ABC, abstractmethod
 
@@ -16,8 +15,9 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 
 from ..core.exceptions import LLMError, ConfigurationError
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BaseLLMChain(ABC):
@@ -57,10 +57,10 @@ class LLMChain(BaseLLMChain):
     
     @classmethod
     def openai(cls, 
-               model: str = "gpt-3.5-turbo",
+               model: str = "gpt-4o-mini",
                api_key: Optional[str] = None,
                temperature: float = 0.5,
-               max_tokens: int = 5000,
+               max_tokens: int = 8000,
                **kwargs) -> 'LLMChain':
         """
         Factory method to create an OpenAI-based LLM chain.
@@ -381,7 +381,7 @@ Important:
 
 # Factory functions for easy chain creation
 def create_simple_llm_chain(api_key: Optional[str] = None, 
-                          model: str = "gpt-3.5-turbo", 
+                          model: str = "gpt-4o-mini", 
                           **kwargs) -> LLMChain:
     """
     Factory function to create a simple LLM chain.
@@ -399,7 +399,7 @@ def create_simple_llm_chain(api_key: Optional[str] = None,
 
 def create_vector_enhanced_chain(vector_store, 
                                 api_key: Optional[str] = None,
-                                model: str = "gpt-3.5-turbo",
+                                model: str = "gpt-4o-mini",
                                 **kwargs) -> VectorStoreLLMChain:
     """
     Factory function to create a vector store enhanced chain.

@@ -5,7 +5,6 @@ This is the primary interface for enriching tabular data using LLMs.
 Much smaller and focused compared to the original TableEnricher class.
 """
 
-import logging
 import time
 import asyncio
 from typing import Dict, List, Optional, Union, AsyncGenerator, Callable
@@ -16,8 +15,9 @@ from .processors import RowProcessor
 from .config import EnrichmentConfig
 from .exceptions import EnrichmentError, FieldValidationError, PartialEnrichmentResult
 from ..data import FieldManager
+from ..utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TableEnricher:

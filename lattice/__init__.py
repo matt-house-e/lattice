@@ -5,6 +5,10 @@ A powerful tool for enriching CSV data using Large Language Models (LLM)
 on a row-by-row basis with clean, production-ready architecture.
 """
 
+# Set up default logging when package is imported
+from .utils.logger import setup_logging
+setup_logging(level="WARNING", format_type="console", include_timestamp=False)
+
 # Import main classes for clean public API using new structure
 from .core import TableEnricher, EnrichmentConfig, EnrichmentError, FieldValidationError
 from .chains import LLMChain, VectorStoreLLMChain

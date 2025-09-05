@@ -32,16 +32,17 @@ dependencies = [
     "tqdm>=4.65.0",
     "tenacity>=9.0.0",
     "python-dotenv>=1.0.0",
+    "tavily-python>=0.3.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
-    "pytest-asyncio>=0.21.0",
+    "pytest-asyncio>=0.21.0", 
+    "pytest-mock>=3.10",
     "black>=23.0",
     "isort>=5.12",
     "mypy>=1.0",
-    "pre-commit>=3.0",
 ]
 vector = [
     "faiss-cpu>=1.7.0",
