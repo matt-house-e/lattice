@@ -204,16 +204,113 @@ Important:
             Dictionary mapping field names to values
         """
         try:
-            # Try to parse as JSON first
+            # Try to parse as raw JSON first
             parsed = json.loads(response_content)
             if isinstance(parsed, dict):
                 return parsed
         except json.JSONDecodeError:
-            logger.debug(f"Response is not valid JSON, using fallback parsing")
+            logger.debug(f"Response is not raw JSON, attempting markdown extraction")
         
-        # Fallback: return the response for all fields
-        # In a production system, you might want more sophisticated parsing
-        return {field: response_content for field in fields.keys()}
+        # Try to extract JSON from markdown code blocks
+        try:
+            extracted_json = self._extract_json_from_markdown(response_content)
+            if extracted_json:
+                parsed = json.loads(extracted_json)
+                if isinstance(parsed, dict):
+                    return parsed
+        except json.JSONDecodeError:
+            logger.debug(f"Extracted content is not valid JSON")
+        except Exception as e:
+            logger.debug(f"Error during markdown JSON extraction: {e}")
+        
+        # Enhanced fallback: try to extract individual field values from response
+        fallback_result = self._extract_fields_from_text(response_content, fields)
+        if fallback_result:
+            return fallback_result
+        
+        # Final fallback: return "Unable to parse" for all fields instead of duplicating content
+        logger.warning(f"Could not parse response, returning default values for all fields")
+        return {field: "Unable to parse response" for field in fields.keys()}
+    
+    def _extract_json_from_markdown(self, text: str) -> Optional[str]:
+        """
+        Extract JSON content from markdown code blocks.
+        
+        Args:
+            text: Text that may contain markdown-wrapped JSON
+            
+        Returns:
+            Extracted JSON string or None if not found
+        """
+        import re
+        
+        # Pattern to match JSON code blocks (```json ... ```)
+        json_pattern = r'```json\s*(.*?)\s*```'
+        match = re.search(json_pattern, text, re.DOTALL | re.IGNORECASE)
+        
+        if match:
+            return match.group(1).strip()
+        
+        # Try generic code blocks (``` ... ```)
+        generic_pattern = r'```\s*(.*?)\s*```'
+        match = re.search(generic_pattern, text, re.DOTALL)
+        
+        if match:
+            content = match.group(1).strip()
+            # Check if it looks like JSON (starts with { and ends with })
+            if content.strip().startswith('{') and content.strip().endswith('}'):
+                return content
+        
+        # Try to find JSON-like content without code blocks
+        json_like_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+        match = re.search(json_like_pattern, text, re.DOTALL)
+        
+        if match:
+            return match.group(0)
+        
+        return None
+    
+    def _extract_fields_from_text(self, text: str, fields: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Attempt to extract field values from unstructured text.
+        
+        Args:
+            text: Response text to parse
+            fields: Expected fields dictionary
+            
+        Returns:
+            Dictionary with extracted field values or None if unsuccessful
+        """
+        import re
+        
+        result = {}
+        field_names = list(fields.keys())
+        
+        # Try to find field: value patterns in the text
+        for field_name in field_names:
+            # Look for patterns like "field_name": "value" or field_name: value
+            patterns = [
+                rf'"{field_name}"\s*:\s*"([^"]*)"',
+                rf'"{field_name}"\s*:\s*([^,\n}}]+)',
+                rf'{field_name}\s*:\s*"([^"]*)"',
+                rf'{field_name}\s*:\s*([^,\n}}]+)',
+                rf'{field_name}\s+is\s*"([^"]*)"',  # Handle "field is 'value'" pattern
+                rf'{field_name}\s+should\s+be\s*"([^"]*)"',  # Handle "field should be 'value'" pattern
+                rf'{field_name}.*?"([^"]*)"',  # General pattern with quotes
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    value = match.group(1).strip()
+                    # Clean up common artifacts
+                    value = value.strip(',').strip()
+                    if value and value not in ['null', 'None', '']:
+                        result[field_name] = value
+                        break
+        
+        # Only return result if we found at least one field
+        return result if result else None
 
 
 class VectorStoreLLMChain(BaseLLMChain):
