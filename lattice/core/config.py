@@ -83,6 +83,19 @@ class EnrichmentConfig:
     enable_progress_bar: bool = True
     """Enable progress bar display"""
     
+    # === Checkpointing Configuration ===
+    enable_checkpointing: bool = False
+    """Enable automatic checkpointing during enrichment"""
+    
+    checkpoint_interval: int = 100
+    """Number of rows processed between checkpoints"""
+    
+    checkpoint_dir: Optional[str] = None
+    """Directory for checkpoint files (None = same as data file)"""
+    
+    auto_resume: bool = True
+    """Automatically resume from checkpoint if found"""
+    
     # === Validation ===
     def __post_init__(self):
         """Validate configuration values after initialization."""
@@ -103,6 +116,9 @@ class EnrichmentConfig:
             
         if not 0.0 <= self.similarity_threshold <= 1.0:
             raise ValueError(f"similarity_threshold must be between 0.0 and 1.0, got {self.similarity_threshold}")
+            
+        if self.checkpoint_interval <= 0:
+            raise ValueError(f"checkpoint_interval must be positive, got {self.checkpoint_interval}")
     
     @classmethod
     def for_development(cls) -> 'EnrichmentConfig':

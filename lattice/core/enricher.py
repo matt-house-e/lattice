@@ -14,6 +14,7 @@ from tqdm import tqdm
 from .processors import RowProcessor
 from .config import EnrichmentConfig
 from .exceptions import EnrichmentError, FieldValidationError, PartialEnrichmentResult
+from .checkpoint import CheckpointManager
 from ..data import FieldManager
 from ..utils.logger import get_logger
 
@@ -54,12 +55,16 @@ class TableEnricher:
         # Create the row processor
         self.processor = RowProcessor(chain, field_manager, config)
         
+        # Create checkpoint manager
+        self.checkpoint_manager = CheckpointManager(config)
+        
         logger.info(f"TableEnricher initialized with {type(chain).__name__} and {field_manager}")
     
     def enrich_dataframe(self, 
                         df: pd.DataFrame, 
                         category: str,
-                        overwrite_fields: bool = None) -> pd.DataFrame:
+                        overwrite_fields: bool = None,
+                        data_identifier: Optional[str] = None) -> pd.DataFrame:
         """
         Enrich a DataFrame by processing rows through the specified category.
         
@@ -67,6 +72,7 @@ class TableEnricher:
             df: DataFrame containing data to enrich
             category: Field category to process
             overwrite_fields: Whether to overwrite existing field values (overrides config)
+            data_identifier: Unique identifier for this data (used for checkpointing)
             
         Returns:
             DataFrame with enriched data
@@ -77,6 +83,10 @@ class TableEnricher:
         """
         if overwrite_fields is None:
             overwrite_fields = self.config.overwrite_fields
+            
+        # Use data_identifier for checkpointing, fallback to hash of DataFrame
+        if data_identifier is None:
+            data_identifier = f"dataframe_{hash(str(df.columns.tolist()) + str(len(df)))}"
             
         logger.info(f"Starting enrichment of {len(df)} rows for category '{category}'")
         
@@ -89,8 +99,24 @@ class TableEnricher:
         fields_dict = self.field_manager.get_category_fields(category)
         logger.info(f"Processing {len(fields_dict)} fields: {list(fields_dict.keys())}")
         
+        # Check for existing checkpoint
+        checkpoint_data = self.checkpoint_manager.load_checkpoint(data_identifier, category)
+        if checkpoint_data:
+            df_checkpoint, checkpoint_metadata = checkpoint_data
+            logger.info(f"Resuming from checkpoint at row {checkpoint_metadata.get('last_processed_idx', 0)}")
+            df_copy = df_checkpoint
+            # Validate that the current fields_dict matches the checkpoint
+            checkpoint_fields = checkpoint_metadata.get('fields_dict', {})
+            if checkpoint_fields != fields_dict:
+                logger.warning("Field definitions changed since checkpoint - starting fresh")
+                df_copy = df.copy()
+            elif checkpoint_metadata.get('overwrite_fields') != overwrite_fields:
+                logger.warning("Overwrite settings changed since checkpoint - starting fresh") 
+                df_copy = df.copy()
+        else:
+            df_copy = df.copy()
+        
         # Prepare DataFrame - ensure all fields exist
-        df_copy = df.copy()
         for field in fields_dict.keys():
             if field not in df_copy.columns:
                 df_copy[field] = None
@@ -104,21 +130,22 @@ class TableEnricher:
                 if loop.is_running():
                     # We're already in an async context, can't use run()
                     logger.warning("Async processing requested but already in async context, falling back to sync")
-                    return self._process_sync(df_copy, fields_dict, overwrite_fields)
+                    return self._process_sync(df_copy, fields_dict, overwrite_fields, data_identifier, category)
                 else:
                     return loop.run_until_complete(
-                        self._process_async(df_copy, fields_dict, overwrite_fields)
+                        self._process_async(df_copy, fields_dict, overwrite_fields, data_identifier, category)
                     )
             except RuntimeError:
                 # No event loop, create one
-                return asyncio.run(self._process_async(df_copy, fields_dict, overwrite_fields))
+                return asyncio.run(self._process_async(df_copy, fields_dict, overwrite_fields, data_identifier, category))
         else:
-            return self._process_sync(df_copy, fields_dict, overwrite_fields)
+            return self._process_sync(df_copy, fields_dict, overwrite_fields, data_identifier, category)
     
     async def enrich_dataframe_async(self,
                                     df: pd.DataFrame,
                                     category: str,
-                                    overwrite_fields: bool = None) -> pd.DataFrame:
+                                    overwrite_fields: bool = None,
+                                    data_identifier: Optional[str] = None) -> pd.DataFrame:
         """
         Asynchronously enrich a DataFrame.
         
@@ -126,12 +153,17 @@ class TableEnricher:
             df: DataFrame containing data to enrich
             category: Field category to process
             overwrite_fields: Whether to overwrite existing field values
+            data_identifier: Unique identifier for this data (used for checkpointing)
             
         Returns:
             DataFrame with enriched data
         """
         if overwrite_fields is None:
             overwrite_fields = self.config.overwrite_fields
+            
+        # Use data_identifier for checkpointing, fallback to hash of DataFrame  
+        if data_identifier is None:
+            data_identifier = f"dataframe_{hash(str(df.columns.tolist()) + str(len(df)))}"
             
         logger.info(f"Starting async enrichment of {len(df)} rows for category '{category}'")
         
@@ -147,12 +179,14 @@ class TableEnricher:
             if field not in df_copy.columns:
                 df_copy[field] = None
         
-        return await self._process_async(df_copy, fields_dict, overwrite_fields)
+        return await self._process_async(df_copy, fields_dict, overwrite_fields, data_identifier, category)
     
     def _process_sync(self,
                      df: pd.DataFrame,
                      fields_dict: Dict,
-                     overwrite_fields: bool) -> pd.DataFrame:
+                     overwrite_fields: bool,
+                     data_identifier: str,
+                     category: str) -> pd.DataFrame:
         """
         Synchronous processing of DataFrame rows.
         
@@ -160,12 +194,15 @@ class TableEnricher:
             df: DataFrame to process
             fields_dict: Fields to enrich
             overwrite_fields: Whether to overwrite existing values
+            data_identifier: Unique identifier for checkpointing
+            category: Field category being processed
             
         Returns:
             Processed DataFrame
         """
         total_rows = len(df)
         errors = []
+        processed_count = 0
         
         # Create progress bar if enabled
         progress_bar = None
@@ -186,6 +223,7 @@ class TableEnricher:
                 
                 # Update the DataFrame
                 self._update_row(df, idx, result, fields_dict, overwrite_fields)
+                processed_count += 1
                 
                 # Call progress callback if provided
                 if self.config.progress_callback:
@@ -194,6 +232,13 @@ class TableEnricher:
                 # Update progress bar
                 if progress_bar:
                     progress_bar.update(1)
+                    
+                # Save checkpoint if enabled and at interval
+                if (self.config.enable_checkpointing and 
+                    processed_count % self.config.checkpoint_interval == 0):
+                    self.checkpoint_manager.save_checkpoint(
+                        df, data_identifier, category, idx, fields_dict, overwrite_fields
+                    )
                 
                 # Add delay between rows if configured
                 if idx < total_rows - 1 and self.config.row_delay > 0:
@@ -220,12 +265,18 @@ class TableEnricher:
             for error in errors[:5]:  # Log first 5 errors
                 logger.warning(f"  Row {error.row_index}: {error.message}")
         
+        # Clean up checkpoint files on successful completion
+        if success_count == total_rows:
+            self.checkpoint_manager.cleanup_checkpoints(data_identifier, category)
+        
         return df
     
     async def _process_async(self,
                             df: pd.DataFrame,
                             fields_dict: Dict,
-                            overwrite_fields: bool) -> pd.DataFrame:
+                            overwrite_fields: bool,
+                            data_identifier: str,
+                            category: str) -> pd.DataFrame:
         """
         Asynchronous processing of DataFrame rows with concurrency control.
         
@@ -233,11 +284,14 @@ class TableEnricher:
             df: DataFrame to process
             fields_dict: Fields to enrich
             overwrite_fields: Whether to overwrite existing values
+            data_identifier: Unique identifier for checkpointing
+            category: Field category being processed
             
         Returns:
             Processed DataFrame
         """
         total_rows = len(df)
+        completed_count = 0
         
         # Create semaphore for concurrency control
         semaphore = asyncio.Semaphore(self.config.max_workers)
@@ -276,6 +330,16 @@ class TableEnricher:
                 completed_tasks.append(result)
                 progress_bar.update(1)
                 
+                # Save checkpoint periodically during async processing
+                if (self.config.enable_checkpointing and 
+                    len(completed_tasks) % self.config.checkpoint_interval == 0):
+                    # Find the highest processed index for checkpoint
+                    max_idx = max((r.get("idx", -1) for r in completed_tasks if r and "idx" in r), default=-1)
+                    if max_idx >= 0:
+                        self.checkpoint_manager.save_checkpoint(
+                            df, data_identifier, category, max_idx, fields_dict, overwrite_fields
+                        )
+                
                 if self.config.progress_callback:
                     self.config.progress_callback(len(completed_tasks), total_rows)
                     
@@ -305,6 +369,10 @@ class TableEnricher:
         
         if errors:
             logger.warning(f"{len(errors)} rows failed processing")
+        
+        # Clean up checkpoint files on successful completion
+        if success_count == total_rows:
+            self.checkpoint_manager.cleanup_checkpoints(data_identifier, category)
         
         return df
     
