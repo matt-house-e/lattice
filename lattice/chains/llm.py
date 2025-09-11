@@ -105,21 +105,52 @@ class LLMChain(BaseLLMChain):
     def _create_default_prompt(self) -> ChatPromptTemplate:
         """Create the default prompt template for enrichment."""
         return ChatPromptTemplate.from_messages([
-            ("system", """You are a data enrichment specialist. Given company data and specific fields to analyze, 
-provide accurate, concise insights for each requested field.
+            ("system",
+            """
+            
+            You are a structured data enrichment engine operating over tabular rows. 
+            Given one input row, a set of field specifications, and optional external context, produce a JSON object with EXACTLY the requested fields as keys and values that satisfy each field’s constraints.
 
-Company Data: {row_data}
+            INPUTS
+            - Row Data (JSON): {row_data}
+            - Field Specifications (JSON): {fields}
+            Each field item contains at least:
+                - prompt: the concrete instruction for this field
+                - instructions: format/refinement constraints
+                - data_type: expected type (e.g., String, Number, Boolean, Date, JSON, List[String])
+                - examples: optional examples of ideal outputs
+            - Optional Context:
+            - Vector Context: {vector_context}
+            - Web Search Results: {web_search_results}
+            If any optional context is empty or unavailable, ignore it.
 
-Fields to analyze: {fields}
+            OUTPUT CONTRACT
+            - Return ONLY a single valid JSON object. No prose, no code fences, no explanations.
+            - Top-level keys MUST be exactly the field names present in Field Specifications.
+            - Values MUST comply with each field’s data_type and instructions.
+            - Keep outputs concise and information-dense. Avoid filler language.
+            - If the row and context are insufficient to answer a field, return "Unable to determine" (String), null (for non-String types), or an empty list (for list types). Never fabricate sources or numbers.
+            - When context includes citations or sources and the field’s instructions ask for sources, include terse source references inline (e.g., "… (Reuters, 2024)"). Do not add URLs unless clearly present in context.
+            - Do not include any keys not requested. Do not include reasoning if not explicitly requested.
 
-For each field, provide a response that matches the field's requirements and data type.
-Return your response as a JSON object with field names as keys and your analysis as values.
+            DECISION GUIDELINES
+            - If sources contradict, prefer the most specific and recent context; otherwise, prefer Row Data.
+            - Follow examples to style the answer when provided, but never copy them verbatim.
+            - Normalize simple formatting:
+            - Numbers: plain numerals; include units only if requested.
+            - Dates: ISO-8601 (YYYY-MM-DD) unless instructions specify another format.
+            - Lists: small, ordered by relevance; 4 items max unless otherwise stated.
 
-Important: 
-- Provide factual, well-reasoned responses
-- Match the expected data type for each field
-- If you cannot determine a value, use "Unable to determine" rather than guessing
-- Keep responses concise but informative"""),
+            EXECUTION
+            For each field:
+            1) Read prompt and instructions.
+            2) Check Row Data; then consult Vector/Web context if helpful.
+            3) Produce an accurate value that satisfies data_type and instructions.
+            4) If insufficient evidence, use the fallback policy above without guessing.
+
+            Return ONLY the final JSON object with the requested fields as keys.
+            
+            """),
             ("user", "Analyze the company data and provide insights for the requested fields.")
         ])
     
@@ -347,16 +378,16 @@ class VectorStoreLLMChain(BaseLLMChain):
     def _create_enhanced_prompt(self) -> ChatPromptTemplate:
         """Create prompt template that includes vector store context."""
         return ChatPromptTemplate.from_messages([
-            ("system", """You are a data enrichment specialist with access to additional context from a knowledge base.
+            ("system", """You are a data enrichment specialist
 
-Company Data: {row_data}
+Row Data: {row_data}
 
 Relevant Context from Knowledge Base:
 {vector_context}
 
 Fields to analyze: {fields}
 
-Using both the company data and the relevant context, provide accurate, well-reasoned insights for each requested field.
+Using both the row data and the relevant context, provide accurate, well-reasoned insights for each requested field.
 Return your response as a JSON object with field names as keys and your analysis as values.
 
 Important:
@@ -364,7 +395,7 @@ Important:
 - Cite specific information from the context when relevant
 - If context doesn't help with a field, rely on the company data
 - Provide factual, concise responses"""),
-            ("user", "Analyze the company data using the provided context and generate insights for the requested fields.")
+            ("user", "Analyze the row data using the provided context and generate insights for the requested fields.")
         ])
     
     def invoke(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
