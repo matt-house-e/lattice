@@ -61,6 +61,7 @@ class LLMChain(BaseLLMChain):
                api_key: Optional[str] = None,
                temperature: float = 0.5,
                max_tokens: int = 8000,
+               enforce_json: bool = True,
                **kwargs) -> 'LLMChain':
         """
         Factory method to create an OpenAI-based LLM chain.
@@ -70,6 +71,7 @@ class LLMChain(BaseLLMChain):
             api_key: OpenAI API key (uses environment variable if not provided)
             temperature: LLM temperature
             max_tokens: Maximum tokens in response
+            enforce_json: If True, enables OpenAI JSON mode for strict JSON outputs
             **kwargs: Additional arguments passed to ChatOpenAI
             
         Returns:
@@ -89,13 +91,29 @@ class LLMChain(BaseLLMChain):
             )
         
         try:
-            llm = ChatOpenAI(
-                model=model,
-                api_key=api_key,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                **kwargs
+            # Respect caller-provided response_format, otherwise set JSON mode if requested
+            response_format = kwargs.pop(
+                "response_format",
+                {"type": "json_object"} if enforce_json else None
             )
+            
+            if response_format is not None:
+                llm = ChatOpenAI(
+                    model=model,
+                    api_key=api_key,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_format=response_format,
+                    **kwargs
+                )
+            else:
+                llm = ChatOpenAI(
+                    model=model,
+                    api_key=api_key,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs
+                )
             
             return cls(llm)
             
