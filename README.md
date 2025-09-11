@@ -65,13 +65,27 @@ This will:
 ## Configuration Files
 
 ### Field Categories (`field_categories.csv`)
-Defines the fields to enrich with their prompts and specifications:
 
+The field categories CSV is the core configuration file that defines how Lattice enriches your data. Each row defines a specific enrichment field with its prompts and behavior.
+
+#### Column Definitions
+
+| Column | Required | Description | Example |
+|--------|----------|-------------|---------|
+| **Category** | ✓ | Groups related fields together for organized processing. Used to select which fields to enrich in a single operation. | `business_analysis`, `web_intelligence`, `financial_metrics` |
+| **Field** | ✓ | The name of the new column that will be added to your data. Must be unique within a category. | `market_size`, `recent_funding`, `competition_level` |
+| **Prompt** | ✓ | The specific instruction given to the LLM for this field. Should be clear, actionable, and focused. | `Estimate the total addressable market size for this company` |
+| **Instructions** | ✓ | Additional context and formatting requirements for the LLM response. Helps ensure consistent output format. | `Provide market size in billions USD and brief reasoning` |
+| **Data_Type** | ✓ | Expected data type of the response. Currently supports `String` (more types planned). | `String` |
+| **Example_1** | Optional | Sample output that demonstrates the expected response format and quality. Used for training and validation. | `$50B - Cloud infrastructure market is rapidly growing` |
+| **Example_N** | Optional | Additional examples can be provided in columns like `Example_2`, `Example_3`, etc. | Multiple examples improve consistency |
+
+#### Sample Configuration
 ```csv
 Category,Field,Prompt,Instructions,Data_Type,Example_1
 business_analysis,market_size,Estimate the total addressable market size for this company,Provide market size in billions USD and brief reasoning,String,"$50B - Cloud infrastructure market is rapidly growing"
 business_analysis,competition_level,Assess the level of competition in this industry,Rate as Low/Medium/High and provide 1-2 key competitors,String,"High - Competes with AWS Amazon Web Services"
-business_analysis,growth_potential,Evaluate the growth potential for this business,Rate as Low/Medium/High and provide reasoning,String,"High - Cloud adoption accelerating post-pandemic"
+web_intelligence,recent_funding,Search for the latest funding rounds and investment information,Include funding amount series stage and lead investors with sources,String,"$50M Series B led by Accel Partners (TechCrunch 2024)"
 ```
 
 ### Sample Data (`sample_data.csv`)
