@@ -172,7 +172,9 @@ class LLMChain(BaseLLMChain):
             messages = self.prompt_template.format_messages(
                 row_data=input_data.get("row_data", {}),
                 fields=input_data.get("fields", {}),
-                category=input_data.get("category", "")
+                category=input_data.get("category", ""),
+                vector_context=input_data.get("vector_context", ""),
+                web_search_results=input_data.get("web_search_results", "")
             )
             
             # Get LLM response
@@ -207,7 +209,9 @@ class LLMChain(BaseLLMChain):
             messages = self.prompt_template.format_messages(
                 row_data=input_data.get("row_data", {}),
                 fields=input_data.get("fields", {}),
-                category=input_data.get("category", "")
+                category=input_data.get("category", ""),
+                vector_context=input_data.get("vector_context", ""),
+                web_search_results=input_data.get("web_search_results", "")
             )
             
             # Get LLM response asynchronously
