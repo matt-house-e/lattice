@@ -16,25 +16,42 @@ class EnrichmentSpec(BaseLLMSchema):
     Represents what we ask the LLM to produce for one field.
     Can be created from CSV row data or programmatically.
 
+    V2 adds: output_format, quality_rules, sources, good/bad examples, fallback
+    for improved LLM guidance and output quality.
+
     Attributes:
         field_name: The output column name
         prompt: What to extract/analyze (the instruction)
-        instructions: Formatting requirements and constraints
+        output_format: Template for expected output structure
+        quality_rules: What makes a good answer (replaces vague "instructions")
+        sources: Preferred data sources for grounding
         data_type: Expected output type
-        examples: Optional example outputs for few-shot learning
+        good_example: Example of ideal output (few-shot positive)
+        bad_example: Example of what NOT to return (few-shot negative)
+        fallback: What to return when data is insufficient
+        examples: Legacy field for backwards compatibility
+        instructions: Legacy field for backwards compatibility
     """
 
     field_name: str = Field(description="Output column name for this field")
     prompt: str = Field(description="What to extract or analyze")
-    instructions: str = Field(default="", description="Formatting requirements")
+
+    # V2 fields for improved guidance
+    output_format: str = Field(default="", description="Template for output structure")
+    quality_rules: str = Field(default="", description="What makes a good answer")
+    sources: str = Field(default="", description="Preferred data sources")
+    good_example: str = Field(default="", description="Example of ideal output")
+    bad_example: str = Field(default="", description="Example of what NOT to return")
+    fallback: str = Field(default="Unable to determine", description="Response when data insufficient")
+
     data_type: Literal["String", "Number", "Boolean", "Date", "JSON", "List"] = Field(
         default="String",
         description="Expected data type for validation"
     )
-    examples: list[str] = Field(
-        default_factory=list,
-        description="Example outputs for few-shot learning"
-    )
+
+    # Legacy fields for backwards compatibility
+    examples: list[str] = Field(default_factory=list, description="Legacy examples")
+    instructions: str = Field(default="", description="Legacy instructions field")
 
     @field_validator('field_name')
     @classmethod
@@ -56,16 +73,34 @@ class EnrichmentSpec(BaseLLMSchema):
     def to_llm_spec(self) -> dict[str, Any]:
         """Convert to dictionary format for LLM prompt injection.
 
-        Returns:
-            Dictionary with prompt, instructions, type for LLM context
+        Returns comprehensive spec including V2 fields when available,
+        falling back to legacy fields for backwards compatibility.
         """
-        spec = {
+        spec: dict[str, Any] = {
             "prompt": self.prompt,
-            "instructions": self.instructions,
             "type": self.data_type
         }
-        if self.examples:
+
+        # V2 fields (preferred)
+        if self.output_format:
+            spec["output_format"] = self.output_format
+        if self.quality_rules:
+            spec["quality_rules"] = self.quality_rules
+        if self.sources:
+            spec["sources"] = self.sources
+        if self.good_example:
+            spec["good_example"] = self.good_example
+        if self.bad_example:
+            spec["bad_example"] = self.bad_example
+        if self.fallback and self.fallback != "Unable to determine":
+            spec["fallback"] = self.fallback
+
+        # Legacy fields (backwards compatibility)
+        if self.instructions and not self.quality_rules:
+            spec["instructions"] = self.instructions
+        if self.examples and not self.good_example:
             spec["examples"] = self.examples
+
         return spec
 
 

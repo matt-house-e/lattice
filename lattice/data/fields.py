@@ -30,7 +30,12 @@ class FieldManager:
     Validates field definitions against Pydantic EnrichmentSpec schema.
     """
 
-    REQUIRED_COLUMNS = ['Category', 'Field', 'Prompt', 'Instructions', 'Data_Type']
+    # V1 required columns (legacy)
+    REQUIRED_COLUMNS_V1 = ['Category', 'Field', 'Prompt', 'Instructions', 'Data_Type']
+    # V2 required columns (new format - Quality_Rules replaces Instructions)
+    REQUIRED_COLUMNS_V2 = ['Category', 'Field', 'Prompt', 'Quality_Rules', 'Data_Type']
+    # Minimum required for any format
+    REQUIRED_COLUMNS_MIN = ['Category', 'Field', 'Prompt', 'Data_Type']
 
     def __init__(self, fields_categories_path: str) -> None:
         """
@@ -85,14 +90,18 @@ class FieldManager:
             if df.empty:
                 raise FieldValidationError(f"Fields categories CSV file is empty: {csv_path}")
             
-            # Validate required columns
-            missing_cols = [col for col in self.REQUIRED_COLUMNS if col not in df.columns]
+            # Validate minimum required columns (flexible for V1/V2 formats)
+            missing_cols = [col for col in self.REQUIRED_COLUMNS_MIN if col not in df.columns]
             if missing_cols:
                 raise FieldValidationError(
                     f"Fields categories CSV missing required columns: {', '.join(missing_cols)}\n"
-                    f"Required columns: {', '.join(self.REQUIRED_COLUMNS)}\n"
+                    f"Required columns: {', '.join(self.REQUIRED_COLUMNS_MIN)}\n"
                     f"Found columns: {', '.join(df.columns)}"
                 )
+
+            # Detect format version for logging
+            is_v2 = 'Quality_Rules' in df.columns or 'Output_Format' in df.columns
+            logger.info(f"Detected CSV format: {'V2' if is_v2 else 'V1'}")
             
             categories = {}
             specs_by_category: Dict[str, List[EnrichmentSpec]] = {}
@@ -113,15 +122,36 @@ class FieldManager:
                     if pd.notna(row[col]):
                         examples.append(str(row[col]))
 
+                # Build spec kwargs - supports both V1 and V2 CSV formats
+                spec_kwargs = {
+                    "field_name": str(field),
+                    "prompt": str(row['Prompt']) if pd.notna(row['Prompt']) else "",
+                    "data_type": str(row['Data_Type']) if pd.notna(row['Data_Type']) else "String",
+                }
+
+                # V1 fields (legacy)
+                if 'Instructions' in df.columns and pd.notna(row.get('Instructions')):
+                    spec_kwargs["instructions"] = str(row['Instructions'])
+                if examples:
+                    spec_kwargs["examples"] = examples
+
+                # V2 fields (new)
+                if 'Output_Format' in df.columns and pd.notna(row.get('Output_Format')):
+                    spec_kwargs["output_format"] = str(row['Output_Format'])
+                if 'Quality_Rules' in df.columns and pd.notna(row.get('Quality_Rules')):
+                    spec_kwargs["quality_rules"] = str(row['Quality_Rules'])
+                if 'Sources' in df.columns and pd.notna(row.get('Sources')):
+                    spec_kwargs["sources"] = str(row['Sources'])
+                if 'Good_Example' in df.columns and pd.notna(row.get('Good_Example')):
+                    spec_kwargs["good_example"] = str(row['Good_Example'])
+                if 'Bad_Example' in df.columns and pd.notna(row.get('Bad_Example')):
+                    spec_kwargs["bad_example"] = str(row['Bad_Example'])
+                if 'Fallback' in df.columns and pd.notna(row.get('Fallback')):
+                    spec_kwargs["fallback"] = str(row['Fallback'])
+
                 # Validate against EnrichmentSpec schema
                 try:
-                    spec = EnrichmentSpec(
-                        field_name=str(field),
-                        prompt=str(row['Prompt']) if pd.notna(row['Prompt']) else "",
-                        instructions=str(row['Instructions']) if pd.notna(row['Instructions']) else "",
-                        data_type=str(row['Data_Type']) if pd.notna(row['Data_Type']) else "String",
-                        examples=examples
-                    )
+                    spec = EnrichmentSpec(**spec_kwargs)
                 except ValidationError as e:
                     logger.warning(f"Skipping invalid field at row {idx}: {e}")
                     continue
