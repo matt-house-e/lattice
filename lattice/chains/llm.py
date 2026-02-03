@@ -3,21 +3,28 @@ Chain classes for the Lattice enrichment tool.
 
 Simple, focused wrappers around LangChain functionality with clean APIs.
 Provides both LLM-only chains and vector store enhanced chains.
+
+Uses Pydantic schemas for type-safe structured outputs with validation-with-retry.
 """
 
 import os
 import json
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, TypeVar, Type
+
 from abc import ABC, abstractmethod
 
 from langchain_core.language_models import BaseLanguageModel
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, ValidationError
 
 from ..core.exceptions import LLMError, ConfigurationError
+from ..schemas import StructuredResult, UsageInfo, EnrichmentResult
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+T = TypeVar('T', bound=BaseModel)
 
 
 class BaseLLMChain(ABC):
@@ -244,7 +251,232 @@ class LLMChain(BaseLLMChain):
             logger.error(f"Async LLM invocation failed: {e}")
             fields = input_data.get("fields", {})
             return {"output": {field: "Error occurred" for field in fields.keys()}}
-    
+
+    def complete_structured(
+        self,
+        input_data: Dict[str, Any],
+        schema: Type[T] = EnrichmentResult,
+        max_retries: int = 2
+    ) -> StructuredResult[T]:
+        """
+        Synchronous structured completion with Pydantic validation.
+
+        Uses OpenAI JSON mode and validates response against Pydantic schema.
+        On validation error, sends error details back to LLM for self-correction.
+
+        Args:
+            input_data: Dictionary with 'row_data', 'fields', and optional 'category'
+            schema: Pydantic model class for output validation (default: EnrichmentResult)
+            max_retries: Number of retry attempts on validation failure
+
+        Returns:
+            StructuredResult[T] with validated data and usage info
+
+        Raises:
+            LLMError: If validation fails after all retries
+        """
+        # Build messages
+        messages = self.prompt_template.format_messages(
+            row_data=input_data.get("row_data", {}),
+            fields=input_data.get("fields", {}),
+            category=input_data.get("category", ""),
+            vector_context=input_data.get("vector_context", ""),
+            web_search_results=input_data.get("web_search_results", "")
+        )
+
+        # Inject JSON schema into system prompt
+        json_schema = schema.model_json_schema()
+        schema_instruction = f"You MUST respond with valid JSON matching this schema: {json.dumps(json_schema)}\n\n"
+
+        # Prepend schema to first message content
+        if messages and hasattr(messages[0], 'content'):
+            messages[0].content = schema_instruction + messages[0].content
+
+        # Capture full prompt for debugging
+        full_prompt = "\n\n".join(
+            f"[{getattr(msg, 'type', 'unknown').upper()}]\n{msg.content}"
+            for msg in messages
+        )
+
+        # Retry loop with validation feedback
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = self.llm.invoke(messages)
+                content = response.content
+
+                # Parse JSON
+                try:
+                    result_data = json.loads(content)
+                except json.JSONDecodeError as e:
+                    if attempt < max_retries:
+                        logger.warning(f"Invalid JSON (attempt {attempt + 1}): {e}")
+                        messages.append(self._create_retry_message(
+                            f"Invalid JSON: {str(e)}. Please respond with valid JSON only."
+                        ))
+                        continue
+                    raise LLMError(f"Failed to get valid JSON after {max_retries + 1} attempts")
+
+                # Validate with Pydantic
+                validated = schema.model_validate(result_data)
+
+                # Extract usage info
+                usage = self._extract_usage(response)
+
+                return StructuredResult[schema](
+                    data=validated,
+                    usage=usage,
+                    full_prompt=full_prompt
+                )
+
+            except ValidationError as e:
+                last_error = e
+                if attempt < max_retries:
+                    error_details = e.json()
+                    logger.warning(f"Validation error (attempt {attempt + 1}): {error_details}")
+                    messages.append(self._create_retry_message(
+                        f"Validation failed: {error_details}. Please fix these issues."
+                    ))
+                    continue
+                raise LLMError(
+                    f"Validation failed after {max_retries + 1} attempts: {last_error}"
+                )
+
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    logger.warning(f"Error (attempt {attempt + 1}): {e}")
+                    continue
+                raise LLMError(f"Structured completion failed: {e}")
+
+        raise LLMError(f"Structured completion failed after {max_retries + 1} attempts")
+
+    async def acomplete_structured(
+        self,
+        input_data: Dict[str, Any],
+        schema: Type[T] = EnrichmentResult,
+        max_retries: int = 2
+    ) -> StructuredResult[T]:
+        """
+        Asynchronous structured completion with Pydantic validation.
+
+        Uses OpenAI JSON mode and validates response against Pydantic schema.
+        On validation error, sends error details back to LLM for self-correction.
+
+        Args:
+            input_data: Dictionary with 'row_data', 'fields', and optional 'category'
+            schema: Pydantic model class for output validation (default: EnrichmentResult)
+            max_retries: Number of retry attempts on validation failure
+
+        Returns:
+            StructuredResult[T] with validated data and usage info
+
+        Raises:
+            LLMError: If validation fails after all retries
+        """
+        # Build messages
+        messages = self.prompt_template.format_messages(
+            row_data=input_data.get("row_data", {}),
+            fields=input_data.get("fields", {}),
+            category=input_data.get("category", ""),
+            vector_context=input_data.get("vector_context", ""),
+            web_search_results=input_data.get("web_search_results", "")
+        )
+
+        # Inject JSON schema into system prompt
+        json_schema = schema.model_json_schema()
+        schema_instruction = f"You MUST respond with valid JSON matching this schema: {json.dumps(json_schema)}\n\n"
+
+        # Prepend schema to first message content
+        if messages and hasattr(messages[0], 'content'):
+            messages[0].content = schema_instruction + messages[0].content
+
+        # Capture full prompt for debugging
+        full_prompt = "\n\n".join(
+            f"[{getattr(msg, 'type', 'unknown').upper()}]\n{msg.content}"
+            for msg in messages
+        )
+
+        # Retry loop with validation feedback
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = await self.llm.ainvoke(messages)
+                content = response.content
+
+                # Parse JSON
+                try:
+                    result_data = json.loads(content)
+                except json.JSONDecodeError as e:
+                    if attempt < max_retries:
+                        logger.warning(f"Invalid JSON (attempt {attempt + 1}): {e}")
+                        messages.append(self._create_retry_message(
+                            f"Invalid JSON: {str(e)}. Please respond with valid JSON only."
+                        ))
+                        continue
+                    raise LLMError(f"Failed to get valid JSON after {max_retries + 1} attempts")
+
+                # Validate with Pydantic
+                validated = schema.model_validate(result_data)
+
+                # Extract usage info
+                usage = self._extract_usage(response)
+
+                return StructuredResult[schema](
+                    data=validated,
+                    usage=usage,
+                    full_prompt=full_prompt
+                )
+
+            except ValidationError as e:
+                last_error = e
+                if attempt < max_retries:
+                    error_details = e.json()
+                    logger.warning(f"Async validation error (attempt {attempt + 1}): {error_details}")
+                    messages.append(self._create_retry_message(
+                        f"Validation failed: {error_details}. Please fix these issues."
+                    ))
+                    continue
+                raise LLMError(
+                    f"Validation failed after {max_retries + 1} attempts: {last_error}"
+                )
+
+            except Exception as e:
+                last_error = e
+                if attempt < max_retries:
+                    logger.warning(f"Async error (attempt {attempt + 1}): {e}")
+                    continue
+                raise LLMError(f"Async structured completion failed: {e}")
+
+        raise LLMError(f"Async structured completion failed after {max_retries + 1} attempts")
+
+    def _create_retry_message(self, error_text: str):
+        """Create a retry message for validation feedback."""
+        from langchain_core.messages import HumanMessage
+        return HumanMessage(content=error_text)
+
+    def _extract_usage(self, response) -> UsageInfo:
+        """Extract token usage from LLM response."""
+        # Try to get usage from response metadata
+        usage_data = getattr(response, 'usage_metadata', None)
+        if usage_data:
+            return UsageInfo(
+                prompt_tokens=getattr(usage_data, 'input_tokens', 0),
+                completion_tokens=getattr(usage_data, 'output_tokens', 0)
+            )
+
+        # Try response_metadata (LangChain format)
+        response_meta = getattr(response, 'response_metadata', {})
+        if 'token_usage' in response_meta:
+            token_usage = response_meta['token_usage']
+            return UsageInfo(
+                prompt_tokens=token_usage.get('prompt_tokens', 0),
+                completion_tokens=token_usage.get('completion_tokens', 0)
+            )
+
+        # Default if no usage info available
+        return UsageInfo(prompt_tokens=0, completion_tokens=0)
+
     def _parse_response(self, response_content: str, fields: Dict[str, Any]) -> Dict[str, Any]:
         """
         Parse LLM response into field values.

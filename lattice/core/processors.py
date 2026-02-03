@@ -2,7 +2,7 @@
 Row processing logic for the Lattice enrichment tool.
 
 Contains the core logic for processing individual rows through enrichment chains.
-This is extracted from the original TableEnricher to follow single responsibility principle.
+Uses Pydantic schemas for type-safe structured outputs.
 """
 
 from typing import Dict, Any, Optional, Union
@@ -12,6 +12,7 @@ import asyncio
 
 from .exceptions import EnrichmentError, LLMError
 from .config import EnrichmentConfig
+from ..schemas import EnrichmentResult, StructuredResult
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,18 +30,21 @@ class RowProcessor:
     - Error handling and retries for individual rows
     """
     
-    def __init__(self, chain, field_manager, config: Optional[EnrichmentConfig] = None):
+    def __init__(self, chain, field_manager, config: Optional[EnrichmentConfig] = None,
+                 use_structured: bool = True):
         """
         Initialize the RowProcessor.
-        
+
         Args:
             chain: The enrichment chain to use (LLMChain, VectorStoreLLMChain, etc.)
             field_manager: FieldManager instance for field specifications
             config: Configuration options (optional)
+            use_structured: If True, use Pydantic structured completion (default: True)
         """
         self.chain = chain
         self.field_manager = field_manager
         self.config = config or EnrichmentConfig()
+        self.use_structured = use_structured and hasattr(chain, 'complete_structured')
         
     def process_row(self, row: pd.Series, fields_dict: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -107,27 +111,29 @@ class RowProcessor:
     
     def _attempt_process_row(self, row: pd.Series, fields_dict: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """
-        Single attempt to process a row (extracted from original enrichment.py).
-        
+        Single attempt to process a row.
+
+        Uses structured completion with Pydantic validation when available,
+        falling back to legacy invoke() method otherwise.
+
         Args:
             row: DataFrame row to process
             fields_dict: Dictionary of fields to enrich
-            
+
         Returns:
             Dictionary containing processed values for each field
         """
         try:
             # Prepare row data for processing (exclude the fields we're trying to enrich)
             row_data = row.drop(list(fields_dict.keys()), errors='ignore')
-            
+
             # Convert Timestamp objects to strings for serialization
             row_data = row_data.apply(lambda x: x.isoformat() if isinstance(x, pd.Timestamp) else x)
-            
+
             # Get category for these fields (for context)
             category = None
             if self.field_manager:
                 try:
-                    # Get category from first field
                     first_field = next(iter(fields_dict))
                     category = self.field_manager.get_field_category(first_field)
                 except Exception as e:
@@ -139,48 +145,56 @@ class RowProcessor:
                 "fields": fields_dict,
                 "category": category
             }
-            
-            # Process through enrichment chain
+
+            # Use structured completion if available
+            if self.use_structured:
+                result: StructuredResult[EnrichmentResult] = self.chain.complete_structured(
+                    chain_input,
+                    schema=EnrichmentResult
+                )
+                logger.debug(f"Structured completion used {result.total_tokens} tokens")
+                return result.data.to_dict()
+
+            # Fallback to legacy invoke
             if hasattr(self.chain, 'invoke'):
                 response = self.chain.invoke(chain_input)
             else:
-                # Fallback for chains that don't follow LangChain interface
                 response = self.chain(chain_input)
-            
+
             # Extract field values from response
             if isinstance(response, dict) and "output" in response:
                 field_values = response["output"]
             elif isinstance(response, dict):
                 field_values = response
             else:
-                # If response is not a dict, try to parse it
                 logger.warning(f"Unexpected response type: {type(response)}, attempting to parse")
                 field_values = self._parse_response(response, fields_dict)
-            
+
             # Ensure we have values for all requested fields
-            result = {}
+            result_dict = {}
             for field in fields_dict:
                 if field in field_values:
-                    result[field] = field_values[field]
+                    result_dict[field] = field_values[field]
                 else:
                     logger.warning(f"Missing field '{field}' in chain response")
-                    result[field] = None
-                    
-            return result
-            
+                    result_dict[field] = None
+
+            return result_dict
+
         except Exception as e:
             logger.error(f"Error in _attempt_process_row: {e}")
-            # Return None/empty values for all fields on error
             return {field: None for field in fields_dict}
     
     async def _attempt_process_row_async(self, row: pd.Series, fields_dict: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         """
         Async version of _attempt_process_row.
-        
+
+        Uses async structured completion with Pydantic validation when available.
+
         Args:
             row: DataFrame row to process
             fields_dict: Dictionary of fields to enrich
-            
+
         Returns:
             Dictionary containing processed values for each field
         """
@@ -188,7 +202,7 @@ class RowProcessor:
             # Prepare row data (same as sync version)
             row_data = row.drop(list(fields_dict.keys()), errors='ignore')
             row_data = row_data.apply(lambda x: x.isoformat() if isinstance(x, pd.Timestamp) else x)
-            
+
             category = None
             if self.field_manager:
                 try:
@@ -202,21 +216,28 @@ class RowProcessor:
                 "fields": fields_dict,
                 "category": category
             }
-            
-            # Try async invocation first, fall back to sync
+
+            # Use async structured completion if available
+            if self.use_structured and hasattr(self.chain, 'acomplete_structured'):
+                result: StructuredResult[EnrichmentResult] = await self.chain.acomplete_structured(
+                    chain_input,
+                    schema=EnrichmentResult
+                )
+                logger.debug(f"Async structured completion used {result.total_tokens} tokens")
+                return result.data.to_dict()
+
+            # Fallback to legacy ainvoke/invoke
             if hasattr(self.chain, 'ainvoke'):
                 response = await self.chain.ainvoke(chain_input)
             elif hasattr(self.chain, 'invoke'):
-                # Run sync method in thread pool to avoid blocking
                 response = await asyncio.get_event_loop().run_in_executor(
                     None, self.chain.invoke, chain_input
                 )
             else:
-                # Fallback for non-LangChain chains
                 response = await asyncio.get_event_loop().run_in_executor(
                     None, self.chain, chain_input
                 )
-            
+
             # Extract field values (same logic as sync version)
             if isinstance(response, dict) and "output" in response:
                 field_values = response["output"]
@@ -224,17 +245,17 @@ class RowProcessor:
                 field_values = response
             else:
                 field_values = self._parse_response(response, fields_dict)
-            
-            result = {}
+
+            result_dict = {}
             for field in fields_dict:
                 if field in field_values:
-                    result[field] = field_values[field]
+                    result_dict[field] = field_values[field]
                 else:
                     logger.warning(f"Missing field '{field}' in chain response")
-                    result[field] = None
-                    
-            return result
-            
+                    result_dict[field] = None
+
+            return result_dict
+
         except Exception as e:
             logger.error(f"Error in _attempt_process_row_async: {e}")
             return {field: None for field in fields_dict}

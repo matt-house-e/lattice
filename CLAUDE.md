@@ -86,3 +86,50 @@ python -c "import lattice; print('✅ Package imports')"
    ```
 
 Manual releases only. No automation until needed.
+
+## GitHub Issue Standards
+
+**ALWAYS include labels when creating issues.** Use this format:
+
+```bash
+gh issue create --title "[Type]: [Component] Description" \
+  --label "type:task,priority:medium,component:core" \
+  --body "..."
+```
+
+### Required Labels (pick one from each category)
+
+**Type** (required):
+- `type:epic` - Multi-sprint initiative
+- `type:story` - User-facing feature
+- `type:task` - Technical work
+- `type:bug` - Defect
+- `type:spike` - Research/investigation
+
+**Priority** (required):
+- `priority:critical` - Production down
+- `priority:high` - Blocking other work
+- `priority:medium` - Important but not blocking
+- `priority:low` - Nice to have
+
+**Component** (1+ required):
+- `component:core` - Config, processors, enricher
+- `component:chains` - LLM chains and prompts
+- `component:data` - Data models and fields
+- `component:vector-store` - Vector store
+- `component:testing` - Test infrastructure
+- `component:docs` - Documentation
+- `component:infra` - CI/CD
+
+### Issue Title Format
+
+```
+[Type]: [Component] Description (max 60 chars)
+```
+
+Examples:
+- `Task: [Chains] Migrate to Pydantic structured outputs`
+- `Bug: [Core] Checkpoint resume fails on empty DataFrame`
+- `Story: [Data] Add CSV field validation`
+
+See `docs/github-standards.md` for full details.

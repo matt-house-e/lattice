@@ -4,11 +4,8 @@ Field management for the Lattice enrichment tool.
 Manages field categories, their specifications, and examples.
 Handles loading, parsing, and accessing field definitions.
 
-This is a cleaned up version of the original field_manager.py with:
-- Cleaner imports (no try/except blocks)
-- Better type hints
-- Simplified logging
-- Enhanced error messages
+Uses Pydantic EnrichmentSpec for validated field definitions.
+CSV fields are validated against the schema at load time.
 """
 
 import logging
@@ -17,7 +14,10 @@ import pandas as pd
 import os
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from ..core.exceptions import FieldValidationError
+from ..schemas import EnrichmentSpec
 
 logger = logging.getLogger(__name__)
 
@@ -25,24 +25,26 @@ logger = logging.getLogger(__name__)
 class FieldManager:
     """
     Manages field categories, their specifications, and examples.
-    
+
     Handles loading, parsing, and accessing field definitions from CSV files.
-    Validates field definitions and provides structured access to field data.
+    Validates field definitions against Pydantic EnrichmentSpec schema.
     """
-    
+
     REQUIRED_COLUMNS = ['Category', 'Field', 'Prompt', 'Instructions', 'Data_Type']
-    
+
     def __init__(self, fields_categories_path: str) -> None:
         """
         Initialize the FieldManager with field category definitions.
-        
+
         Args:
             fields_categories_path: Path to CSV file containing field categories and specifications
-            
+
         Raises:
             FieldValidationError: If the CSV file is invalid or missing required columns
         """
         self.fields_categories_path = Path(fields_categories_path)
+        # Initialize specs dict before loading (populated during load)
+        self._specs: Dict[str, List[EnrichmentSpec]] = {}
         self.categories = self._load_field_categories(fields_categories_path)
 
     @classmethod
@@ -93,36 +95,57 @@ class FieldManager:
                 )
             
             categories = {}
-            
+            specs_by_category: Dict[str, List[EnrichmentSpec]] = {}
+
             # Process each row in the CSV
             for idx, row in df.iterrows():
                 category = row['Category']
                 field = row['Field']
-                
+
                 # Validate required fields are not empty
                 if pd.isna(category) or pd.isna(field):
                     logger.warning(f"Skipping row {idx} with empty Category or Field: {row.to_dict()}")
                     continue
-                
-                # Create field specification dictionary
-                field_dict = {
-                    "prompt": row['Prompt'] if pd.notna(row['Prompt']) else "",
-                    "instructions": row['Instructions'] if pd.notna(row['Instructions']) else "",
-                    "type": row['Data_Type'] if pd.notna(row['Data_Type']) else "String"
-                }
-                
-                # Add examples if present
-                examples = {}
-                for i, col in enumerate(df.columns[5:], start=1):
+
+                # Extract examples from columns beyond the required ones
+                examples = []
+                for col in df.columns[5:]:
                     if pd.notna(row[col]):
-                        examples[f"example_{i}"] = row[col]
-                if examples:
-                    field_dict["examples"] = examples
-                
-                # Add to categories dictionary
+                        examples.append(str(row[col]))
+
+                # Validate against EnrichmentSpec schema
+                try:
+                    spec = EnrichmentSpec(
+                        field_name=str(field),
+                        prompt=str(row['Prompt']) if pd.notna(row['Prompt']) else "",
+                        instructions=str(row['Instructions']) if pd.notna(row['Instructions']) else "",
+                        data_type=str(row['Data_Type']) if pd.notna(row['Data_Type']) else "String",
+                        examples=examples
+                    )
+                except ValidationError as e:
+                    logger.warning(f"Skipping invalid field at row {idx}: {e}")
+                    continue
+
+                # Store validated spec
+                if category not in specs_by_category:
+                    specs_by_category[category] = []
+                specs_by_category[category].append(spec)
+
+                # Also maintain legacy dict format for backwards compatibility
+                field_dict = {
+                    "prompt": spec.prompt,
+                    "instructions": spec.instructions,
+                    "type": spec.data_type
+                }
+                if spec.examples:
+                    field_dict["examples"] = {f"example_{i+1}": ex for i, ex in enumerate(spec.examples)}
+
                 if category not in categories:
                     categories[category] = {}
-                categories[category][field] = field_dict
+                categories[category][spec.field_name] = field_dict
+
+            # Store specs for later access
+            self._specs = specs_by_category
             
             # Validate that at least one category was loaded
             if not categories:
@@ -279,14 +302,52 @@ class FieldManager:
     def validate_category(self, category: str) -> bool:
         """
         Check if a category exists.
-        
+
         Args:
             category: Category name to validate
-            
+
         Returns:
             True if category exists, False otherwise
         """
         return category in self.categories
+
+    def get_enrichment_specs(self, category: str) -> List[EnrichmentSpec]:
+        """
+        Get validated EnrichmentSpec objects for a category.
+
+        This is the preferred method for getting field specifications
+        as it returns type-safe Pydantic objects.
+
+        Args:
+            category: Category name to get specs for
+
+        Returns:
+            List of EnrichmentSpec objects for the category
+
+        Raises:
+            FieldValidationError: If the category doesn't exist
+        """
+        if category not in self._specs:
+            available_categories = ", ".join(self._specs.keys())
+            raise FieldValidationError(
+                f"Category '{category}' not found. Available categories: {available_categories}"
+            )
+        return self._specs[category]
+
+    def get_specs_as_dict(self, category: str) -> Dict[str, Dict]:
+        """
+        Get field specs as dictionary for LLM prompt injection.
+
+        Converts EnrichmentSpec objects to dict format expected by LLM chains.
+
+        Args:
+            category: Category name
+
+        Returns:
+            Dictionary mapping field names to their LLM-ready specifications
+        """
+        specs = self.get_enrichment_specs(category)
+        return {spec.field_name: spec.to_llm_spec() for spec in specs}
     
     def get_field_count(self, category: Optional[str] = None) -> int:
         """
