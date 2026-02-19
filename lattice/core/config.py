@@ -66,13 +66,6 @@ class EnrichmentConfig:
     cache_ttl: int = 3600
     """Cache time-to-live in seconds"""
     
-    # === Vector Store Configuration ===
-    vector_store_path: Optional[str] = None
-    """Path to vector store directory"""
-    
-    similarity_threshold: float = 0.8
-    """Minimum similarity score for vector store matches"""
-    
     # === Logging Configuration ===
     log_level: str = "INFO"
     """Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"""
@@ -113,10 +106,7 @@ class EnrichmentConfig:
             
         if self.max_workers <= 0:
             raise ValueError(f"max_workers must be positive, got {self.max_workers}")
-            
-        if not 0.0 <= self.similarity_threshold <= 1.0:
-            raise ValueError(f"similarity_threshold must be between 0.0 and 1.0, got {self.similarity_threshold}")
-            
+
         if self.checkpoint_interval <= 0:
             raise ValueError(f"checkpoint_interval must be positive, got {self.checkpoint_interval}")
     
