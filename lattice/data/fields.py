@@ -150,51 +150,6 @@ class FieldManager:
                 raise  # Re-raise our custom exceptions
             raise FieldValidationError(f"Failed to load field categories CSV {csv_path}: {str(e)}")
 
-    def get_category_examples(self, category: str) -> List[Dict]:
-        """
-        Retrieve example data for a specific category from field definitions.
-        
-        Args:
-            category: The category identifier to fetch examples for
-            
-        Returns:
-            List of dictionaries containing field name-value pairs from examples
-            
-        Raises:
-            FieldValidationError: If the category doesn't exist
-        """
-        if category not in self.categories:
-            available_categories = ", ".join(self.categories.keys())
-            raise FieldValidationError(
-                f"Category '{category}' not found. Available categories: {available_categories}"
-            )
-            
-        category_fields = self.categories[category]
-        
-        # Get maximum number of examples across all fields
-        max_examples = 0
-        for field_info in category_fields.values():
-            if 'examples' in field_info:
-                max_examples = max(max_examples, len(field_info['examples']))
-        
-        if max_examples == 0:
-            logger.info(f"No examples found for category '{category}'")
-            return []
-            
-        # Initialize list of example dictionaries
-        examples = [{} for _ in range(max_examples)]
-        
-        # Populate examples for each field
-        for field_name, field_info in category_fields.items():
-            if 'examples' in field_info:
-                for i, example_value in enumerate(field_info['examples'].values()):
-                    if i < len(examples):
-                        examples[i][field_name] = example_value
-        
-        # Remove any empty example dictionaries
-        examples = [ex for ex in examples if ex]
-        return examples
-
     def get_category_fields(self, category: str) -> Dict:
         """
         Get field specifications for a specific category.
@@ -233,56 +188,6 @@ class FieldManager:
         """
         return list(self.categories.keys())
         
-    def get_fields_info(self) -> Dict[str, Dict[str, List[str]]]:
-        """
-        Get information about all fields including their keywords.
-        
-        Returns:
-            Dictionary mapping field names to their information including keywords
-        """
-        fields_info = {}
-        for category in self.categories.values():
-            for field_name, field_info in category.items():
-                # Extract keywords from prompt and instructions
-                keywords = []
-                if field_info.get('prompt'):
-                    keywords.extend(field_info['prompt'].lower().split())
-                if field_info.get('instructions'):
-                    keywords.extend(field_info['instructions'].lower().split())
-                
-                fields_info[field_name] = {
-                    'keywords': list(set(keywords)),  # Remove duplicates
-                    'type': field_info.get('type', 'String')
-                }
-        return fields_info
-        
-    def get_field_category(self, field_name: str) -> str:
-        """
-        Get the category name for a given field.
-        
-        Args:
-            field_name: Name of the field to look up
-            
-        Returns:
-            Category name for the field
-            
-        Raises:
-            FieldValidationError: If the field doesn't exist in any category
-        """
-        for category_name, category in self.categories.items():
-            if field_name in category:
-                return category_name
-        
-        # Build helpful error message with available fields
-        all_fields = []
-        for category in self.categories.values():
-            all_fields.extend(category.keys())
-        
-        raise FieldValidationError(
-            f"Field '{field_name}' not found in any category. "
-            f"Available fields: {', '.join(all_fields[:10])}{'...' if len(all_fields) > 10 else ''}"
-        )
-    
     def validate_category(self, category: str) -> bool:
         """
         Check if a category exists.
@@ -320,3 +225,29 @@ class FieldManager:
             f"{cat}({len(fields)})" for cat, fields in self.categories.items()
         )
         return f"FieldManager({len(self.categories)} categories, {total_fields} total fields: {categories_summary})"
+
+
+def load_fields(csv_path: str, category: Optional[str] = None) -> Dict[str, Dict]:
+    """Load field specs from CSV, suitable for passing to ``LLMStep(fields=...)``.
+
+    Args:
+        csv_path: Path to the field categories CSV file.
+        category: If provided, return only fields in this category.
+            If None, return all fields merged across categories.
+
+    Returns:
+        Dict mapping field names to their specs (prompt, type, instructions).
+
+    Example::
+
+        from lattice.data import load_fields
+        fields = load_fields("fields.csv", category="business_analysis")
+        pipeline = Pipeline([LLMStep("analyze", fields=fields)])
+    """
+    fm = FieldManager(csv_path)
+    if category:
+        return fm.get_category_fields(category)
+    all_fields: Dict[str, Dict] = {}
+    for cat in fm.get_categories():
+        all_fields.update(fm.get_category_fields(cat))
+    return all_fields

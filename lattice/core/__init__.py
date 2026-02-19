@@ -8,7 +8,7 @@ from .exceptions import (
     FieldValidationError,
     StepError,
     PipelineError,
-    PartialEnrichmentResult,
+    RowError,
 )
 
 __all__ = [
@@ -20,5 +20,5 @@ __all__ = [
     "FieldValidationError",
     "StepError",
     "PipelineError",
-    "PartialEnrichmentResult",
+    "RowError",
 ]
