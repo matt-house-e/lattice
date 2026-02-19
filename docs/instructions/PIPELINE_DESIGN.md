@@ -1,6 +1,6 @@
 # Pipeline Architecture Design
 
-> **Status**: Phase 1 COMPLETE. Phases 2-4 redesigned (Feb 2026).
+> **Status**: Phases 1-2 COMPLETE. Phases 3-4 pending.
 > **Version**: v0.3
 > **Date**: February 2026
 

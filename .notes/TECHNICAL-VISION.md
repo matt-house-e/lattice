@@ -328,10 +328,10 @@ def test_enrichment_accuracy():
 ## Implementation Priority (Updated Feb 2026)
 
 ### Immediate: Foundation (Phases 2-3)
-1. **API redesign** - `Pipeline.run(df)` as primary API, fields on steps, Enricher internal (Phase 2)
-2. **Resilience** - Per-row error handling, API retry/backoff (Phase 2)
-3. **Observability** - Progress reporting, cost aggregation (Phase 2)
-4. **Config/code cleanup** - Remove dead fields, dead code, FieldManager → utility (Phase 2)
+1. **API redesign** - `Pipeline.run(df)` as primary API, fields on steps, Enricher internal (Phase 2) ✅
+2. **Resilience** - Per-row error handling, API retry/backoff (Phase 2) ✅
+3. **Observability** - Progress reporting, cost aggregation (Phase 2) ✅
+4. **Config/code cleanup** - Remove dead fields, dead code, FieldManager → utility (Phase 2) ✅
 5. **Caching** - Input-hash cache for iterative development (Phase 3)
 
 ### Ship: Polish (Phase 4)

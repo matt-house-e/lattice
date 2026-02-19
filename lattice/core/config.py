@@ -48,6 +48,10 @@ class EnrichmentConfig:
     """Base delay for exponential backoff on API errors (seconds).
     Actual delay: base_delay * 2^attempt + jitter."""
 
+    on_error: str = "continue"
+    """Error handling mode: 'continue' collects errors and returns partial results,
+    'raise' fails fast on the first row error."""
+
     # === Logging ===
     log_level: str = "INFO"
     """Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)."""

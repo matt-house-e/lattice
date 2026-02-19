@@ -1,9 +1,10 @@
-"""LLMStep — calls an OpenAI-compatible chat model for enrichment."""
+"""LLMStep — calls an LLM provider for structured enrichment."""
 
 from __future__ import annotations
 
+import asyncio
 import json
-import os
+import random
 from typing import Any, Optional, Type
 
 from pydantic import BaseModel, ValidationError
@@ -13,6 +14,7 @@ from ..schemas.base import UsageInfo
 from ..schemas.enrichment import EnrichmentResult
 from ..utils.logger import get_logger
 from .base import StepContext, StepResult
+from .providers.base import LLMAPIError, LLMClient, LLMResponse
 
 logger = get_logger(__name__)
 
@@ -65,9 +67,10 @@ Return ONLY the final JSON object with the requested fields as keys."""
 
 
 class LLMStep:
-    """Calls an OpenAI-compatible chat model to produce enrichment values.
+    """Calls an LLM provider to produce enrichment values.
 
     Features:
+      - Provider-agnostic via LLMClient protocol (OpenAI default).
       - Lazy client initialisation (no import-time API key check).
       - Builds system message with: system prompt + row data + field specs + prior results.
       - Uses ``response_format={"type": "json_object"}``.
@@ -78,37 +81,64 @@ class LLMStep:
     def __init__(
         self,
         name: str,
-        fields: list[str],
+        fields: list[str] | dict[str, str | dict],
         depends_on: list[str] | None = None,
         model: str = "gpt-4.1-nano",
         temperature: float | None = None,
         max_tokens: int | None = None,
         system_prompt: str | None = None,
         api_key: str | None = None,
+        base_url: str | None = None,
+        client: LLMClient | None = None,
         schema: Type[BaseModel] = EnrichmentResult,
         max_retries: int = 2,
     ):
         self.name = name
-        self.fields = fields
         self.depends_on = depends_on or []
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
         self.api_key = api_key
+        self.base_url = base_url
         self.schema = schema
         self.max_retries = max_retries
-        self._client: Any = None  # openai.AsyncOpenAI, lazily created
+        self._client: LLMClient | None = client
+
+        # Normalize fields: dict → inline specs + field names list
+        if isinstance(fields, dict):
+            self._field_specs = self._normalize_field_specs(fields)
+            self.fields = list(fields.keys())
+        else:
+            self._field_specs: dict[str, dict[str, Any]] = {}
+            self.fields = fields
+
+    @staticmethod
+    def _normalize_field_specs(fields: dict[str, str | dict]) -> dict[str, dict[str, Any]]:
+        """Convert shorthand field specs to full dicts.
+
+        ``{"market_size": "Estimate TAM"}`` → ``{"market_size": {"prompt": "Estimate TAM"}}``
+        ``{"market_size": {"prompt": "...", "type": "String"}}`` → passed through
+        """
+        result: dict[str, dict[str, Any]] = {}
+        for name, spec in fields.items():
+            if isinstance(spec, str):
+                result[name] = {"prompt": spec}
+            else:
+                result[name] = dict(spec)
+        return result
 
     # -- client ----------------------------------------------------------
 
-    def _get_client(self) -> Any:
-        """Lazily create the AsyncOpenAI client."""
+    def _resolve_client(self) -> LLMClient:
+        """Lazily create or return the LLMClient."""
         if self._client is None:
-            from openai import AsyncOpenAI
+            from .providers.openai import OpenAIClient
 
-            key = self.api_key or os.environ.get("OPENAI_API_KEY")
-            self._client = AsyncOpenAI(api_key=key)
+            self._client = OpenAIClient(
+                api_key=self.api_key,
+                base_url=self.base_url,
+            )
         return self._client
 
     # -- message building ------------------------------------------------
@@ -117,7 +147,9 @@ class LLMStep:
         parts = [self.system_prompt]
         parts.append("\n--- DATA ---")
         parts.append(f"Row Data: {json.dumps(ctx.row, default=str)}")
-        parts.append(f"Field Specifications: {json.dumps(ctx.fields, default=str)}")
+        # Use inline field specs if available, otherwise fall back to context
+        field_specs = self._field_specs if self._field_specs else ctx.fields
+        parts.append(f"Field Specifications: {json.dumps(field_specs, default=str)}")
         if ctx.prior_results:
             parts.append(f"Prior Step Results: {json.dumps(ctx.prior_results, default=str)}")
         return "\n".join(parts)
@@ -125,7 +157,14 @@ class LLMStep:
     # -- run -------------------------------------------------------------
 
     async def run(self, ctx: StepContext) -> StepResult:
-        client = self._get_client()
+        """Execute the LLM call with two-layer retry.
+
+        Outer loop: API errors (429, 500, timeouts) with exponential backoff.
+            Uses config.max_retries and config.retry_base_delay.
+        Inner loop: Parse/validation errors fed back to the LLM.
+            Uses self.max_retries (step-level).
+        """
+        client = self._resolve_client()
 
         temperature = self.temperature
         if temperature is None and ctx.config is not None:
@@ -139,69 +178,103 @@ class LLMStep:
         if max_tokens is None:
             max_tokens = 4000
 
+        # API retry config from EnrichmentConfig
+        api_max_retries = 3
+        retry_base_delay = 1.0
+        if ctx.config is not None:
+            api_max_retries = getattr(ctx.config, "max_retries", api_max_retries)
+            retry_base_delay = getattr(ctx.config, "retry_base_delay", retry_base_delay)
+
         system_content = self._build_system_message(ctx)
-        messages: list[dict[str, str]] = [
-            {"role": "system", "content": system_content},
-            {
-                "role": "user",
-                "content": "Analyze the provided data and return the requested fields as JSON.",
-            },
-        ]
 
-        last_error: BaseException | None = None
-        content: str = ""
+        last_api_error: BaseException | None = None
+        total_attempts = 0
 
-        for attempt in range(self.max_retries + 1):
+        for api_attempt in range(api_max_retries + 1):
+            # Reset messages for each API retry (parse retries accumulate within)
+            messages: list[dict[str, str]] = [
+                {"role": "system", "content": system_content},
+                {
+                    "role": "user",
+                    "content": "Analyze the provided data and return the requested fields as JSON.",
+                },
+            ]
+
+            last_parse_error: BaseException | None = None
+            content: str = ""
+
             try:
-                response = await client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    response_format={"type": "json_object"},
+                for parse_attempt in range(self.max_retries + 1):
+                    total_attempts += 1
+                    try:
+                        response: LLMResponse = await client.complete(
+                            messages=messages,
+                            model=self.model,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            response_format={"type": "json_object"},
+                        )
+
+                        content = response.content
+                        parsed = json.loads(content)
+                        validated = self.schema.model_validate(parsed)
+                        all_values = validated.model_dump()
+
+                        # Filter to declared fields
+                        values = {k: v for k, v in all_values.items() if k in self.fields}
+
+                        return StepResult(
+                            values=values,
+                            usage=response.usage,
+                            metadata={
+                                "raw_response": content,
+                                "attempts": total_attempts,
+                                "api_retries": api_attempt,
+                            },
+                        )
+
+                    except (json.JSONDecodeError, ValidationError) as exc:
+                        last_parse_error = exc
+                        logger.warning(
+                            "LLMStep '%s' parse attempt %d failed: %s",
+                            self.name, parse_attempt + 1, exc,
+                        )
+                        # Feed the error back so the LLM can self-correct
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    f"Your response was invalid: {exc}. "
+                                    "Please return valid JSON matching the required schema."
+                                ),
+                            },
+                        )
+
+                # All parse retries exhausted
+                raise StepError(
+                    f"LLMStep '{self.name}' failed after {self.max_retries + 1} "
+                    f"parse attempts: {last_parse_error}",
+                    step_name=self.name,
                 )
 
-                content = response.choices[0].message.content or ""
-                parsed = json.loads(content)
-                validated = self.schema.model_validate(parsed)
-                all_values = validated.model_dump()
-
-                # Filter to declared fields
-                values = {k: v for k, v in all_values.items() if k in self.fields}
-
-                usage = None
-                if response.usage:
-                    usage = UsageInfo(
-                        prompt_tokens=response.usage.prompt_tokens,
-                        completion_tokens=response.usage.completion_tokens,
-                        total_tokens=response.usage.total_tokens,
-                        model=self.model,
+            except LLMAPIError as exc:
+                last_api_error = exc
+                if api_attempt < api_max_retries:
+                    # Exponential backoff with jitter
+                    delay = retry_base_delay * (2 ** api_attempt)
+                    # Respect Retry-After header if available
+                    if exc.retry_after is not None:
+                        delay = max(delay, exc.retry_after)
+                    # Add jitter (0-25% of delay)
+                    delay += random.uniform(0, delay * 0.25)
+                    logger.warning(
+                        "LLMStep '%s' API error (attempt %d/%d), retrying in %.1fs: %s",
+                        self.name, api_attempt + 1, api_max_retries + 1, delay, exc,
                     )
-
-                return StepResult(
-                    values=values,
-                    usage=usage,
-                    metadata={"raw_response": content, "attempts": attempt + 1},
-                )
-
-            except (json.JSONDecodeError, ValidationError) as exc:
-                last_error = exc
-                logger.warning(
-                    "LLMStep '%s' attempt %d failed: %s", self.name, attempt + 1, exc
-                )
-                # Feed the error back so the LLM can self-correct
-                messages.append({"role": "assistant", "content": content})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Your response was invalid: {exc}. "
-                            "Please return valid JSON matching the required schema."
-                        ),
-                    },
-                )
+                    await asyncio.sleep(delay)
 
         raise StepError(
-            f"LLMStep '{self.name}' failed after {self.max_retries + 1} attempts: {last_error}",
+            f"LLMStep '{self.name}' API error after {api_max_retries + 1} retries: {last_api_error}",
             step_name=self.name,
         )

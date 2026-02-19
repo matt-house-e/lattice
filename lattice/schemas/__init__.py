@@ -1,12 +1,11 @@
 """Pydantic schemas for the Lattice pipeline."""
 
-from .base import UsageInfo
-from .enrichment import EnrichmentResult, EnrichmentSpec
-from .structured import StructuredResult
+from .base import CostSummary, StepUsage, UsageInfo
+from .enrichment import EnrichmentResult
 
 __all__ = [
+    "CostSummary",
+    "StepUsage",
     "UsageInfo",
-    "EnrichmentSpec",
     "EnrichmentResult",
-    "StructuredResult",
 ]

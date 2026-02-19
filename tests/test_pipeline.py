@@ -116,11 +116,12 @@ class TestPipelineExecution:
             FunctionStep("a", fn=_identity_fn(["f1"]), fields=["f1"]),
         ])
         rows = [{"company": "Acme"}, {"company": "Beta"}]
-        results = await p.execute(rows, all_fields={"f1": {"prompt": "test"}})
+        results, errors, cost = await p.execute(rows, all_fields={"f1": {"prompt": "test"}})
 
         assert len(results) == 2
         assert results[0] == {"f1": "f1_value"}
         assert results[1] == {"f1": "f1_value"}
+        assert errors == []
 
     @pytest.mark.asyncio
     async def test_two_independent_steps(self):
@@ -128,9 +129,10 @@ class TestPipelineExecution:
             FunctionStep("a", fn=_identity_fn(["f1"]), fields=["f1"]),
             FunctionStep("b", fn=_identity_fn(["f2"]), fields=["f2"]),
         ])
-        results = await p.execute([{"x": 1}], all_fields={"f1": {}, "f2": {}})
+        results, errors, cost = await p.execute([{"x": 1}], all_fields={"f1": {}, "f2": {}})
 
         assert results[0] == {"f1": "f1_value", "f2": "f2_value"}
+        assert errors == []
 
     @pytest.mark.asyncio
     async def test_dependency_routing(self):
@@ -148,10 +150,11 @@ class TestPipelineExecution:
         ])
 
         rows = [{"input": "hello"}, {"input": "world"}]
-        results = await p.execute(rows, all_fields={})
+        results, errors, cost = await p.execute(rows, all_fields={})
 
         assert results[0]["final"] == "hello_processed_done"
         assert results[1]["final"] == "world_processed_done"
+        assert errors == []
 
     @pytest.mark.asyncio
     async def test_diamond_dependency_routing(self):
@@ -181,14 +184,16 @@ class TestPipelineExecution:
             ),
         ])
 
-        results = await p.execute([{"x": 0}], all_fields={})
+        results, errors, cost = await p.execute([{"x": 0}], all_fields={})
         assert results[0] == {"a_out": 1, "b_out": 11, "c_out": 101, "d_out": 112}
+        assert errors == []
 
     @pytest.mark.asyncio
     async def test_empty_rows(self):
         p = Pipeline([FunctionStep("a", fn=lambda ctx: {"f": 1}, fields=["f"])])
-        results = await p.execute([], all_fields={})
+        results, errors, cost = await p.execute([], all_fields={})
         assert results == []
+        assert errors == []
 
     @pytest.mark.asyncio
     async def test_config_max_workers(self):
@@ -204,13 +209,14 @@ class TestPipelineExecution:
             return {"f": call_count}
 
         p = Pipeline([FunctionStep("a", fn=slow_fn, fields=["f"])])
-        config = SimpleNamespace(max_workers=2)
-        results = await p.execute(
+        config = SimpleNamespace(max_workers=2, on_error="continue")
+        results, errors, cost = await p.execute(
             [{"x": i} for i in range(5)],
             all_fields={},
             config=config,
         )
         assert len(results) == 5
+        assert errors == []
 
     @pytest.mark.asyncio
     async def test_internal_fields_passed_between_steps(self):
@@ -225,10 +231,56 @@ class TestPipelineExecution:
             ),
         ])
 
-        results = await p.execute([{"q": "test"}], all_fields={})
+        results, errors, cost = await p.execute([{"q": "test"}], all_fields={})
         assert results[0]["summary"] == "Based on: search data"
         # Internal fields are still in results — Enricher filters them later
         assert results[0]["__web_ctx"] == "search data"
+        assert errors == []
+
+
+# -- cost aggregation ----------------------------------------------------
+
+
+class TestCostAggregation:
+    @pytest.mark.asyncio
+    async def test_function_step_has_no_cost(self):
+        p = Pipeline([
+            FunctionStep("a", fn=_identity_fn(["f1"]), fields=["f1"]),
+        ])
+        results, errors, cost = await p.execute([{"x": 1}], all_fields={})
+        assert cost.total_tokens == 0
+        assert cost.steps == {}
+
+    @pytest.mark.asyncio
+    async def test_cost_from_step_with_usage(self):
+        """Step that returns usage info gets aggregated."""
+        from lattice.schemas.base import UsageInfo
+        from lattice.steps.base import StepResult
+
+        class UsageStep:
+            name = "llm_mock"
+            fields = ["f1"]
+            depends_on = []
+
+            async def run(self, ctx):
+                return StepResult(
+                    values={"f1": "val"},
+                    usage=UsageInfo(
+                        prompt_tokens=100, completion_tokens=50,
+                        total_tokens=150, model="test-model",
+                    ),
+                )
+
+        p = Pipeline([UsageStep()])
+        results, errors, cost = await p.execute(
+            [{"x": 1}, {"x": 2}], all_fields={},
+        )
+        assert cost.total_prompt_tokens == 200
+        assert cost.total_completion_tokens == 100
+        assert cost.total_tokens == 300
+        assert "llm_mock" in cost.steps
+        assert cost.steps["llm_mock"].rows_processed == 2
+        assert cost.steps["llm_mock"].model == "test-model"
 
 
 # -- get_step ------------------------------------------------------------

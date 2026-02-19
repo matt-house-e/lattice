@@ -9,24 +9,30 @@ from .utils.logger import setup_logging
 setup_logging(level="WARNING", format_type="console", include_timestamp=False)
 
 # Public API
-from .core import Enricher, EnrichmentConfig, EnrichmentError, FieldValidationError
-from .pipeline import Pipeline
+from .core import Enricher, EnrichmentConfig, EnrichmentError, FieldValidationError, RowError
+from .pipeline import Pipeline, PipelineResult
 from .steps import Step, StepContext, StepResult, FunctionStep, LLMStep
-from .data import FieldManager
+from .schemas.base import CostSummary
 
 __version__ = "0.3.0"
 __author__ = "Lattice Team"
 
 __all__ = [
-    "Enricher",
+    # Primary API
     "Pipeline",
+    "PipelineResult",
+    "LLMStep",
+    "FunctionStep",
+    "EnrichmentConfig",
+    # Step protocol
     "Step",
     "StepContext",
     "StepResult",
-    "FunctionStep",
-    "LLMStep",
-    "FieldManager",
-    "EnrichmentConfig",
+    # Results & errors
+    "CostSummary",
+    "RowError",
     "EnrichmentError",
     "FieldValidationError",
+    # Internal runner (power users)
+    "Enricher",
 ]

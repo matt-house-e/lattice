@@ -72,7 +72,7 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 1 | Core pipeline engine: Step protocol, Pipeline, LLMStep, FunctionStep, Enricher rewrite | COMPLETE |
-| 2 | Resilience + API redesign: error handling, retries, progress, cost, Pipeline.run(df), fields on steps | NOT STARTED |
+| 2 | Resilience + API redesign: error handling, retries, progress, cost, Pipeline.run(df), fields on steps | COMPLETE |
 | 3 | Caching: Input-hash cache, filesystem backend, cache controls | NOT STARTED |
 | 4 | Polish: Lifecycle hooks, docs, examples, CLI, PyPI publish | NOT STARTED |
 

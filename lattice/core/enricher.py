@@ -1,8 +1,8 @@
 """Enricher — Pipeline-based, column-oriented DataFrame enrichment.
 
-Primary public interface for Lattice v0.3.  Accepts a Pipeline +
-FieldManager, validates field routing, manages per-step checkpoints,
-and provides sync/async DataFrame APIs.
+Internal runner for Lattice. Created via ``Pipeline.runner(config)``
+for repeated execution with checkpointing, or used directly for
+backward compatibility with FieldManager-based workflows.
 """
 
 import asyncio
@@ -14,7 +14,6 @@ import pandas as pd
 from .checkpoint import CheckpointManager
 from .config import EnrichmentConfig
 from .exceptions import EnrichmentError, FieldValidationError
-from ..data import FieldManager
 from ..pipeline import Pipeline
 from ..utils.logger import get_logger
 
@@ -24,16 +23,17 @@ logger = get_logger(__name__)
 class Enricher:
     """Orchestrates column-oriented pipeline execution over a DataFrame.
 
-    Usage::
-
-        enricher = Enricher(pipeline, field_manager)
-        df = enricher.run(df, "company_info")
+    Two modes:
+      1. **With FieldManager** (backward compat): ``Enricher(pipeline, field_manager=fm)``
+         requires category on run().
+      2. **Without FieldManager** (new API): ``Enricher(pipeline)``
+         field specs come from steps.
     """
 
     def __init__(
         self,
         pipeline: Pipeline,
-        field_manager: FieldManager,
+        field_manager: Any = None,
         config: Optional[EnrichmentConfig] = None,
     ) -> None:
         self.pipeline = pipeline
@@ -46,7 +46,7 @@ class Enricher:
     def run(
         self,
         df: pd.DataFrame,
-        category: str,
+        category: Optional[str] = None,
         overwrite_fields: Optional[bool] = None,
         data_identifier: Optional[str] = None,
     ) -> pd.DataFrame:
@@ -74,19 +74,17 @@ class Enricher:
     async def run_async(
         self,
         df: pd.DataFrame,
-        category: str,
+        category: Optional[str] = None,
         overwrite_fields: Optional[bool] = None,
         data_identifier: Optional[str] = None,
     ) -> pd.DataFrame:
-        """Execute the pipeline for *category* across all rows of *df*.
+        """Execute the pipeline across all rows of *df*.
 
-        Steps:
-            1. Validate category exists in FieldManager.
-            2. Validate field routing (every category field covered by exactly one step).
-            3. Load checkpoint (if any) and skip already-completed steps.
-            4. Execute pipeline.
-            5. Write results back to DataFrame (filtering ``__`` internal fields).
-            6. Clean up checkpoint on success.
+        If a FieldManager is set, ``category`` is required and field routing
+        is validated against the category's field definitions.
+
+        If no FieldManager, field specs come from the steps themselves
+        (inline dict fields on LLMStep).
         """
         if overwrite_fields is None:
             overwrite_fields = self.config.overwrite_fields
@@ -94,18 +92,26 @@ class Enricher:
         if data_identifier is None:
             data_identifier = f"df_{hash(str(df.columns.tolist()) + str(len(df)))}"
 
-        # 1. Validate category
-        if not self.field_manager.validate_category(category):
-            available = ", ".join(self.field_manager.get_categories())
-            raise FieldValidationError(
-                f"Category '{category}' not found. Available: {available}"
-            )
+        # Determine field specs
+        if self.field_manager is not None:
+            # Legacy path: FieldManager + category required
+            if category is None:
+                raise FieldValidationError(
+                    "category is required when using FieldManager"
+                )
+            if not self.field_manager.validate_category(category):
+                available = ", ".join(self.field_manager.get_categories())
+                raise FieldValidationError(
+                    f"Category '{category}' not found. Available: {available}"
+                )
+            fields_dict = self.field_manager.get_category_fields(category)
+            self._validate_field_routing(fields_dict)
+        else:
+            # New path: field specs come from steps
+            fields_dict = self.pipeline._collect_field_specs()
+            category = category or "_default"
 
-        # 2. Get field specs & validate routing
-        fields_dict = self.field_manager.get_category_fields(category)
-        self._validate_field_routing(fields_dict)
-
-        # 3. Checkpoint resume
+        # Checkpoint resume
         prior_step_results: dict[str, list[dict[str, Any]]] | None = None
         completed_steps: list[str] = []
         checkpoint_results: dict[str, list[dict[str, Any]]] = {}
@@ -128,11 +134,10 @@ class Enricher:
                     f"Resuming from checkpoint: skipping {completed_steps}"
                 )
 
-        # 4. Convert DataFrame to rows
+        # Convert DataFrame to rows
         rows = df.to_dict(orient="records")
 
-        # 5. Build on_step_complete callback for checkpointing
-        # Track completed steps and results across callback invocations
+        # Build on_step_complete callback for checkpointing
         cb_completed = list(completed_steps)
         cb_results = dict(checkpoint_results)
 
@@ -146,12 +151,12 @@ class Enricher:
                 step_row_results=step_row_results,
                 total_rows=len(rows),
                 fields_dict=fields_dict,
-                existing_completed=cb_completed[:-1],  # before this step
+                existing_completed=cb_completed[:-1],
                 existing_results={k: v for k, v in cb_results.items() if k != step_name},
             )
 
-        # 6. Execute pipeline
-        accumulated = await self.pipeline.execute(
+        # Execute pipeline
+        accumulated, errors, cost = await self.pipeline.execute(
             rows=rows,
             all_fields=fields_dict,
             config=self.config,
@@ -159,7 +164,16 @@ class Enricher:
             on_step_complete=on_step_complete,
         )
 
-        # 7. Write results back to DataFrame
+        # Log error summary if any
+        if errors:
+            error_summary = {}
+            for err in errors:
+                error_summary[err.step_name] = error_summary.get(err.step_name, 0) + 1
+            logger.warning(
+                "Pipeline completed with %d row errors: %s", len(errors), error_summary
+            )
+
+        # Write results back to DataFrame
         df_out = df.copy()
         for idx in range(len(df_out)):
             for key, value in accumulated[idx].items():
@@ -173,11 +187,11 @@ class Enricher:
                         continue
                 df_out.at[df_out.index[idx], key] = value
 
-        # 8. Cleanup checkpoint on success
+        # Cleanup checkpoint on success
         self._checkpoint.cleanup(data_identifier, category)
 
         logger.info(
-            f"Enrichment complete: {len(df_out)} rows, category '{category}'"
+            f"Enrichment complete: {len(df_out)} rows"
         )
         return df_out
 
