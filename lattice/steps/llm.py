@@ -80,7 +80,7 @@ class LLMStep:
         name: str,
         fields: list[str],
         depends_on: list[str] | None = None,
-        model: str = "gpt-4o-mini",
+        model: str = "gpt-4.1-nano",
         temperature: float | None = None,
         max_tokens: int | None = None,
         system_prompt: str | None = None,

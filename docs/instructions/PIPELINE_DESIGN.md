@@ -1,6 +1,6 @@
 # Pipeline Architecture Design
 
-> **Status**: Approved, not yet implemented
+> **Status**: Phase 1 COMPLETE. Phases 2-4 redesigned (Feb 2026).
 > **Version**: v0.3
 > **Date**: February 2026
 
@@ -83,13 +83,15 @@ class LLMStep:
     def __init__(
         self,
         name: str,
-        fields: list[str],
+        fields: list[str] | dict[str, str | dict],  # Phase 2: inline specs
         depends_on: list[str] = None,
-        model: str = "gpt-4o-mini",
+        model: str = "gpt-4.1-nano",
         temperature: float = None,    # Falls back to config
         max_tokens: int = None,       # Falls back to config
         system_prompt: str = None,    # Falls back to built-in enrichment prompt
         api_key: str = None,          # Falls back to OPENAI_API_KEY env
+        base_url: str = None,         # Phase 2: OpenAI-compatible endpoints
+        client: LLMClient = None,     # Phase 2: any LLMClient protocol adapter
         schema: Type[BaseModel] = EnrichmentResult,
         max_retries: int = 2,
     ): ...
@@ -97,7 +99,18 @@ class LLMStep:
     async def run(self, ctx: StepContext) -> StepResult: ...
 ```
 
-- Uses `openai.AsyncOpenAI` directly (no LangChain)
+**Fields parameter (Phase 2):**
+- `list[str]` — field names only, specs come from external source (backward compat)
+- `dict[str, str]` — shorthand: `{"market_size": "Estimate TAM"}` → prompt only
+- `dict[str, dict]` — full spec: `{"market_size": {"prompt": "...", "type": "String", "instructions": "...", "examples": [...]}}`
+
+When fields is a dict, LLMStep uses specs directly in `_build_system_message()` — no FieldManager needed.
+
+- Uses `LLMClient` protocol internally (not `openai.AsyncOpenAI` directly)
+- `OpenAIClient` is the default adapter (covers OpenAI + all compatible providers via `base_url`)
+- `AnthropicClient` and `GoogleClient` ship as optional extras
+- `client` parameter accepts any `LLMClient`-compatible adapter
+- `base_url` shortcut creates `OpenAIClient(base_url=...)` for OpenAI-compatible providers
 - Lazy client initialization (no import-time API key check)
 - Builds system message with: system prompt + row data + field specs + prior_results + JSON schema
 - Calls with `response_format={"type": "json_object"}`
@@ -122,46 +135,93 @@ class FunctionStep:
 - Sync functions run via `run_in_executor`
 - The escape hatch for any data source: APIs, databases, custom logic
 
-### WebSearchStep (`lattice/steps/web_search.py`) — Phase 2
+### LLMClient Protocol (`lattice/steps/providers/base.py`) — Phase 2
 
-Not in Phase 1. Composition example for when it exists:
 ```python
+class LLMClient(Protocol):
+    """What LLMStep needs from any LLM provider."""
+    async def complete(
+        self,
+        messages: list[dict],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        response_format: dict | None = None,
+    ) -> LLMResponse: ...
+
+@dataclass
+class LLMResponse:
+    content: str
+    usage: UsageInfo | None = None
+```
+
+**Shipped adapters:**
+- `OpenAIClient` (~30 lines) — default. Covers OpenAI, DeepSeek, Groq, Together, Fireworks, Ollama, vLLM, Mistral, LM Studio via `base_url`.
+- `AnthropicClient` (~30 lines) — optional extra: `pip install lattice[anthropic]`
+- `GoogleClient` (~30 lines) — optional extra: `pip install lattice[google]`
+
+**Import:** `from lattice.providers import OpenAIClient, AnthropicClient, GoogleClient`
+
+### No Built-in WebSearchStep
+
+**Decision (Feb 2026): WebSearchStep was scrapped.** FunctionStep already handles any data source — web search, APIs, databases. Users bring their own search provider:
+
+```python
+async def web_search(ctx):
+    results = await my_search_provider(ctx.row["company_name"])
+    return {"__web_context": results}
+
 Pipeline([
-    WebSearchStep("search"),
+    FunctionStep("search", fn=web_search, fields=["__web_context"]),
     LLMStep("analyze", fields=["market_size"], depends_on=["search"]),
 ])
 ```
 
-## Enricher
+No Tavily dependency. No provider abstraction. No "waterfall resolution." Users write a function; Lattice orchestrates it.
+
+## Primary API: Pipeline.run()
+
+**Phase 2 redesign:** Pipeline becomes the primary public interface. Enricher becomes an internal runner.
 
 ```python
-# lattice/core/enricher.py
+# lattice/pipeline/pipeline.py
+
+class Pipeline:
+    def __init__(self, steps: list[Step]): ...
+
+    # Primary entry points (Phase 2)
+    def run(self, df: pd.DataFrame, config: EnrichmentConfig = None) -> pd.DataFrame: ...
+    async def run_async(self, df: pd.DataFrame, config: EnrichmentConfig = None) -> pd.DataFrame: ...
+
+    # Power user: reusable runner with config
+    def runner(self, config: EnrichmentConfig = None) -> Enricher: ...
+
+    # Core execution (Phase 1, unchanged)
+    async def execute(self, rows, all_fields, config, ...) -> list[dict]: ...
+```
+
+### `run()` implementation
+1. Collect field specs from steps (LLMStep provides specs, FunctionStep provides names only)
+2. Create internal Enricher with config
+3. Convert DataFrame rows to `list[dict]`
+4. Call `self.execute(rows, fields, config)`
+5. Write results back to DataFrame (filtering `__` prefixed internal fields)
+6. Return enriched DataFrame
+
+### Enricher (internal runner)
+
+```python
+# lattice/core/enricher.py — internal, not in public API
 
 class Enricher:
-    def __init__(self, pipeline: Pipeline, field_manager: FieldManager, config: EnrichmentConfig = None): ...
-    def run(self, df: pd.DataFrame, category: str, ...) -> pd.DataFrame: ...           # Sync wrapper
-    async def run_async(self, df: pd.DataFrame, category: str, ...) -> pd.DataFrame: ... # Real impl
+    def __init__(self, pipeline: Pipeline, config: EnrichmentConfig = None): ...
+    def run(self, df: pd.DataFrame) -> pd.DataFrame: ...
+    async def run_async(self, df: pd.DataFrame) -> pd.DataFrame: ...
 ```
 
-### `run()` sync wrapper
-```python
-def run(self, df, category, **kwargs):
-    try:
-        loop = asyncio.get_running_loop()
-        # Already in async context (Jupyter, FastAPI) - warn and use nest_asyncio or thread
-    except RuntimeError:
-        return asyncio.run(self.run_async(df, category, **kwargs))
-```
+Enricher handles: DataFrame conversion, checkpointing, `__` field filtering, sync/async wrapping. Created via `pipeline.runner(config=...)` for repeated execution with the same config.
 
-### `run_async()` implementation
-1. Validate category exists in FieldManager
-2. Get field specs via `field_manager.get_specs_as_dict(category)`
-3. Load checkpoint if available
-4. Convert DataFrame rows to `list[dict]`
-5. Call `pipeline.execute(rows, fields, config)`
-6. Write results back to DataFrame (filtering `__` prefixed internal fields)
-7. Save checkpoint at intervals
-8. Return enriched DataFrame
+No FieldManager parameter. No category parameter. Field specs come from steps.
 
 ## Dependencies
 
@@ -179,7 +239,11 @@ def run(self, df, category, **kwargs):
 - `pandas>=2.0.0`
 - `tqdm>=4.65.0`
 - `python-dotenv>=1.0.0`
-- `tavily-python>=0.3.0` (for Phase 2)
+
+### Optional Extras (Phase 2)
+- `anthropic>=1.0.0` — `pip install lattice[anthropic]`
+- `google-genai>=1.0.0` — `pip install lattice[google]`
+- `pip install lattice[all]` — both
 
 ## Files Ported Unchanged
 
@@ -199,10 +263,14 @@ New checkpoint model:
 
 ## Field Routing Validation
 
-The Enricher must validate at `run()` time:
-- Every field in the requested category has exactly one Pipeline step producing it
-- No step produces fields not in the category (warning, not error)
-- Missing fields → `FieldValidationError` (fail fast, don't silently drop fields)
+Pipeline validates at construction time:
+- No duplicate step names, no missing dependencies, no cycles (already done in Phase 1)
+- No two steps produce the same non-`__` field
+
+Optional validation at `run()` time:
+- `pipeline.run(df, expected_fields=["market_size", "competition"])` validates coverage
+- Missing fields → `FieldValidationError` (fail fast)
+- No category concept — just a flat list of expected field names
 
 ## System Prompt
 
@@ -234,25 +302,40 @@ for col in df.columns:
 
 ## Usage Examples
 
-### Simple: One LLM step
+### Simple: One LLM step (primary API)
 ```python
-from lattice import Enricher, Pipeline, LLMStep, FieldManager
+from lattice import Pipeline, LLMStep
 
 pipeline = Pipeline([
-    LLMStep("analyze", fields=["market_size", "competition_level", "growth_potential"])
+    LLMStep("analyze", fields={
+        "market_size": "Estimate the total addressable market in billions USD",
+        "competition": "Rate as Low/Medium/High with key competitors",
+        "growth_potential": "Evaluate growth potential with reasoning",
+    })
 ])
-enricher = Enricher(pipeline=pipeline, field_manager=FieldManager.from_csv("fields.csv"))
-result = enricher.run(df, category="business_analysis")
+result = pipeline.run(df)
 ```
 
-### Multi-step with dependencies (Phase 2+)
+### Multi-step with dependencies
 ```python
+from lattice import Pipeline, LLMStep, FunctionStep
+
+async def search_company(ctx):
+    results = await my_search(ctx.row["name"])
+    return {"__web_context": results}
+
 pipeline = Pipeline([
-    WebSearchStep("search"),
-    LLMStep("market", fields=["market_size", "competition_level"]),
+    FunctionStep("search", fn=search_company, fields=["__web_context"]),
+    LLMStep("market", fields={
+        "market_size": "Estimate TAM using search results",
+        "competition": "Rate competition level",
+    }),
     # search + market run in parallel, then synthesis uses both
-    LLMStep("synthesis", fields=["growth_potential"], depends_on=["search", "market"]),
+    LLMStep("synthesis", fields={
+        "growth_potential": "Synthesize growth potential from market data and search results",
+    }, depends_on=["search", "market"]),
 ])
+result = pipeline.run(df)
 ```
 
 ### Custom function step
@@ -263,6 +346,102 @@ def lookup_funding(ctx):
 
 pipeline = Pipeline([
     FunctionStep("crunchbase", fn=lookup_funding, fields=["funding_amount"]),
-    LLMStep("analysis", fields=["investment_thesis"], depends_on=["crunchbase"]),
+    LLMStep("analysis", fields={
+        "investment_thesis": "Write an investment thesis based on funding data",
+    }, depends_on=["crunchbase"]),
 ])
+result = pipeline.run(df)
 ```
+
+### Power user: reusable runner
+```python
+from lattice import EnrichmentConfig
+
+runner = pipeline.runner(config=EnrichmentConfig(
+    max_workers=10,
+    enable_checkpointing=True,
+))
+result = await runner.run_async(df)
+```
+
+### Team with CSV field definitions
+```python
+from lattice.data import load_fields
+
+fields = load_fields("fields.csv", category="business_analysis")
+pipeline = Pipeline([LLMStep("analyze", fields=fields)])
+result = pipeline.run(df)
+```
+
+---
+
+## Phase 2: Resilience + API Redesign (Epic #27)
+
+Phase 1 built the happy path. Phase 2 makes it work for real workloads and simplifies the public API.
+
+### API Redesign (#29)
+
+The biggest change in Phase 2. Simplifies from 5 concepts to 2.
+
+- `Pipeline.run(df)` becomes the primary entry point
+- Fields defined inline on LLMStep (dict of field → prompt)
+- Enricher becomes internal runner (accessed via `pipeline.runner()`)
+- FieldManager demoted to `load_fields()` utility in `lattice.data`
+- No categories in core — flat field lists
+- Remove `EnrichmentSpec` (unused), clean up dead FieldManager methods
+
+### Per-Row Error Handling (#23)
+
+**Problem:** `asyncio.gather()` in `_execute_step` propagates one row's exception and kills all rows.
+
+**Fix:** Use `return_exceptions=True` or equivalent. Failed rows produce error sentinels. Pipeline returns partial results + error report. Configurable: raise-on-any-failure vs. collect-and-continue.
+
+### API-Level Retry with Backoff (#24)
+
+**Problem:** LLMStep retries JSON parse errors (smart) but crashes on 429s, 500s, timeouts.
+
+**Fix:** Catch `openai.RateLimitError`, `openai.APIError`, `openai.APITimeoutError`. Exponential backoff with jitter. Respect `Retry-After` header. Separate retry budget from parse-error retries.
+
+### Progress Reporting (#20)
+
+**Fix:** Wire tqdm into `Pipeline.execute()`. Step-level progress bar. Wire `progress_callback` from config.
+
+### Cost Aggregation (#25)
+
+**Problem:** `StepResult.usage` is discarded — `pipeline.py:203` only keeps `.values`.
+
+**Fix:** Collect usage across rows and steps. Pipeline exposes cost summary after completion.
+
+### Config Cleanup (#19) + Dead Code Removal (#26)
+
+Remove or wire unused config fields. Remove dead exception classes (`VectorStoreError`, `LLMError`). Fix factory presets.
+
+### LLMStep Provider Flexibility (#28)
+
+Add `base_url` and `client` parameters. No litellm dependency — users bring their own client.
+
+## Phase 3: Caching (Epic #17)
+
+Input-hash cache: `hash(step_name + row_data + field_specs)` → cached result. Filesystem backend (JSON). TTL-based expiry. Manual bypass. Per-step enable/disable.
+
+## Phase 4: Polish
+
+- Lifecycle hooks for observability (#30) — callbacks at pipeline/step/row boundaries
+- Working examples with sample data
+- CLI: `lattice run --csv data.csv --fields fields.csv`
+- PyPI publish: `pip install lattice-enrichment`
+- README rewrite with real examples
+
+## Design Decisions Log
+
+| Decision | Date | Rationale |
+|----------|------|-----------|
+| `Pipeline.run(df)` as primary API | Feb 2026 | One concept, one entry point. Enricher is internal detail, not public API. |
+| Fields live on steps | Feb 2026 | Single source of truth. No separate field registry. LLMStep declares what AND how. |
+| FieldManager → `load_fields()` utility | Feb 2026 | CSV loading is a convenience, not a core dependency. No categories in core. |
+| Drop WebSearchStep | Feb 2026 | FunctionStep already handles any data source. No built-in provider steps. |
+| Drop waterfall resolution | Feb 2026 | Source priority is user logic (domain-specific), not framework logic. |
+| LLMClient protocol + shipped adapters | Feb 2026 | OpenAI default, Anthropic/Google as optional extras (~30 lines each). Covers top 3 providers + all OpenAI-compatible via base_url. |
+| No litellm dependency | Feb 2026 | Too heavy (~30 transitive deps). Protocol + thin adapters achieves the same with zero required deps. |
+| No langfuse/eval dependency | Feb 2026 | Evals are application-level. Lattice exposes hooks for observability tools to plug in. |
+| Phase 2 = Resilience + API redesign | Feb 2026 | Foundation gaps + API simplification must happen before PyPI publish. |

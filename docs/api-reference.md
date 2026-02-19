@@ -101,7 +101,7 @@ from lattice import LLMStep
 step = LLMStep(
     name="analyze",
     fields=["market_size", "competition_level"],
-    model="gpt-4o-mini",
+    model="gpt-4.1-nano",
     temperature=0.3,
     max_retries=2,
 )
@@ -114,7 +114,7 @@ step = LLMStep(
 | `name` | `str` | required | Step name (unique within pipeline) |
 | `fields` | `list[str]` | required | Field names this step produces |
 | `depends_on` | `list[str]` | `[]` | Step names this depends on |
-| `model` | `str` | `"gpt-4o-mini"` | OpenAI model name |
+| `model` | `str` | `"gpt-4.1-nano"` | OpenAI model name |
 | `temperature` | `float` | `None` | Falls back to config, then `0.5` |
 | `max_tokens` | `int` | `None` | Falls back to config, then `4000` |
 | `system_prompt` | `str` | `None` | Falls back to built-in enrichment prompt |
@@ -233,9 +233,9 @@ Configuration dataclass with factory presets.
 from lattice import EnrichmentConfig
 
 config = EnrichmentConfig(
-    max_workers=5,
+    max_workers=30,             # Tier 2+ accounts
+    temperature=0.2,            # Precise structured output
     enable_checkpointing=True,
-    overwrite_fields=False,
 )
 ```
 

@@ -51,7 +51,7 @@ class TestLLMStepConstruction:
     def test_defaults(self):
         step = LLMStep(name="llm", fields=["f1"])
         assert step.depends_on == []
-        assert step.model == "gpt-4o-mini"
+        assert step.model == "gpt-4.1-nano"
         assert step.temperature is None
         assert step.max_tokens is None
         assert step.system_prompt == DEFAULT_SYSTEM_PROMPT
@@ -153,7 +153,7 @@ class TestLLMStepRun:
         assert result.values == {"market_size": "Large"}
         assert result.usage is not None
         assert result.usage.total_tokens == 15
-        assert result.usage.model == "gpt-4o-mini"
+        assert result.usage.model == "gpt-4.1-nano"
         assert result.metadata["attempts"] == 1
 
     @pytest.mark.asyncio
