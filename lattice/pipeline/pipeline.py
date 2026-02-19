@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Callable, Optional
 
 from ..core.exceptions import PipelineError
 from ..steps.base import Step, StepContext, StepResult
@@ -107,6 +107,8 @@ class Pipeline:
         rows: list[dict[str, Any]],
         all_fields: dict[str, dict[str, Any]],
         config: Any = None,
+        prior_step_results: Optional[dict[str, list[dict[str, Any]]]] = None,
+        on_step_complete: Optional[Callable[[str, list[dict[str, Any]]], None]] = None,
     ) -> list[dict[str, Any]]:
         """Execute the pipeline across all rows (column-oriented).
 
@@ -114,6 +116,10 @@ class Pipeline:
             rows: Row dicts (converted from DataFrame at the Enricher boundary).
             all_fields: field_name -> field_spec dict from FieldManager.
             config: Optional EnrichmentConfig.
+            prior_step_results: Pre-populated results for checkpoint resume.
+                Steps in this dict are skipped; their results feed dependency routing.
+            on_step_complete: Sync callback fired after each newly-executed step
+                finishes for all rows.  Signature: (step_name, row_results).
 
         Returns:
             List of dicts, one per row, with merged outputs from all steps.
@@ -125,23 +131,34 @@ class Pipeline:
         semaphore = asyncio.Semaphore(max_workers)
         num_rows = len(rows)
 
-        # Per-step, per-row output values
+        # Pre-populate step_values from checkpoint data
         step_values: dict[str, list[dict[str, Any]]] = {}
+        if prior_step_results:
+            step_values.update(prior_step_results)
 
         for level in self._execution_levels:
-            level_coros = [
-                self._execute_step(
-                    self._step_map[step_name],
-                    rows,
-                    all_fields,
-                    config,
-                    step_values,
-                    semaphore,
-                    num_rows,
-                )
-                for step_name in level
-            ]
-            await asyncio.gather(*level_coros)
+            # Only execute steps not already in step_values (i.e. not resumed)
+            steps_to_run = [name for name in level if name not in step_values]
+
+            if steps_to_run:
+                level_coros = [
+                    self._execute_step(
+                        self._step_map[step_name],
+                        rows,
+                        all_fields,
+                        config,
+                        step_values,
+                        semaphore,
+                        num_rows,
+                    )
+                    for step_name in steps_to_run
+                ]
+                await asyncio.gather(*level_coros)
+
+                # Fire callback for each newly-executed step
+                if on_step_complete is not None:
+                    for step_name in steps_to_run:
+                        on_step_complete(step_name, step_values[step_name])
 
         # Merge all step results in execution order
         accumulated: list[dict[str, Any]] = [{} for _ in range(num_rows)]

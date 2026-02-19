@@ -1,462 +1,228 @@
-"""
-Main enricher class for the Lattice enrichment tool.
+"""Enricher — Pipeline-based, column-oriented DataFrame enrichment.
 
-This is the primary interface for enriching tabular data using LLMs.
-Much smaller and focused compared to the original TableEnricher class.
+Primary public interface for Lattice v0.3.  Accepts a Pipeline +
+FieldManager, validates field routing, manages per-step checkpoints,
+and provides sync/async DataFrame APIs.
 """
 
-import time
 import asyncio
-from typing import Dict, List, Optional, Union, AsyncGenerator, Callable
-import pandas as pd
-from tqdm import tqdm
+import warnings
+from typing import Any, Optional
 
-from .processors import RowProcessor
-from .config import EnrichmentConfig
-from .exceptions import EnrichmentError, FieldValidationError, PartialEnrichmentResult
+import pandas as pd
+
 from .checkpoint import CheckpointManager
+from .config import EnrichmentConfig
+from .exceptions import EnrichmentError, FieldValidationError
 from ..data import FieldManager
+from ..pipeline import Pipeline
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class TableEnricher:
+class Enricher:
+    """Orchestrates column-oriented pipeline execution over a DataFrame.
+
+    Usage::
+
+        enricher = Enricher(pipeline, field_manager)
+        df = enricher.run(df, "company_info")
     """
-    Main orchestrator for CSV/DataFrame enrichment.
-    
-    This class coordinates the enrichment process by:
-    - Managing the overall workflow
-    - Delegating row processing to RowProcessor
-    - Handling progress tracking and reporting
-    - Managing batch processing and concurrency
-    - Providing both sync and async interfaces
-    
-    Much simpler than the original 285-line version - focuses on orchestration
-    rather than doing everything itself.
-    """
-    
-    def __init__(self, 
-                 chain,  # LLMChain, VectorStoreLLMChain, etc.
-                 field_manager: FieldManager,
-                 config: Optional[EnrichmentConfig] = None):
-        """
-        Initialize the TableEnricher.
-        
-        Args:
-            chain: The enrichment chain to use (LLMChain, VectorStoreLLMChain, etc.)
-            field_manager: FieldManager instance for field definitions
-            config: Configuration options (optional, uses defaults if not provided)
-        """
-        self.chain = chain
+
+    def __init__(
+        self,
+        pipeline: Pipeline,
+        field_manager: FieldManager,
+        config: Optional[EnrichmentConfig] = None,
+    ) -> None:
+        self.pipeline = pipeline
         self.field_manager = field_manager
         self.config = config or EnrichmentConfig()
-        
-        # Create the row processor
-        self.processor = RowProcessor(chain, field_manager, config)
-        
-        # Create checkpoint manager
-        self.checkpoint_manager = CheckpointManager(config)
-        
-        logger.info(f"TableEnricher initialized with {type(chain).__name__} and {field_manager}")
-    
-    def enrich_dataframe(self, 
-                        df: pd.DataFrame, 
-                        category: str,
-                        overwrite_fields: bool = None,
-                        data_identifier: Optional[str] = None) -> pd.DataFrame:
+        self._checkpoint = CheckpointManager(self.config)
+
+    # -- sync entry point ------------------------------------------------
+
+    def run(
+        self,
+        df: pd.DataFrame,
+        category: str,
+        overwrite_fields: Optional[bool] = None,
+        data_identifier: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Synchronous wrapper around :meth:`run_async`.
+
+        Raises ``RuntimeError`` if called from inside a running event loop
+        (use ``run_async`` directly in that case).
         """
-        Enrich a DataFrame by processing rows through the specified category.
-        
-        Args:
-            df: DataFrame containing data to enrich
-            category: Field category to process
-            overwrite_fields: Whether to overwrite existing field values (overrides config)
-            data_identifier: Unique identifier for this data (used for checkpointing)
-            
-        Returns:
-            DataFrame with enriched data
-            
-        Raises:
-            FieldValidationError: If category doesn't exist
-            EnrichmentError: If enrichment process fails
-        """
-        if overwrite_fields is None:
-            overwrite_fields = self.config.overwrite_fields
-            
-        # Use data_identifier for checkpointing, fallback to hash of DataFrame
-        if data_identifier is None:
-            data_identifier = f"dataframe_{hash(str(df.columns.tolist()) + str(len(df)))}"
-            
-        logger.info(f"Starting enrichment of {len(df)} rows for category '{category}'")
-        
-        # Validate category exists
-        if not self.field_manager.validate_category(category):
-            available = ", ".join(self.field_manager.get_categories())
-            raise FieldValidationError(f"Category '{category}' not found. Available: {available}")
-        
-        # Get fields for this category
-        fields_dict = self.field_manager.get_category_fields(category)
-        logger.info(f"Processing {len(fields_dict)} fields: {list(fields_dict.keys())}")
-        
-        # Check for existing checkpoint
-        checkpoint_data = self.checkpoint_manager.load_checkpoint(data_identifier, category)
-        if checkpoint_data:
-            df_checkpoint, checkpoint_metadata = checkpoint_data
-            logger.info(f"Resuming from checkpoint at row {checkpoint_metadata.get('last_processed_idx', 0)}")
-            df_copy = df_checkpoint
-            # Validate that the current fields_dict matches the checkpoint
-            checkpoint_fields = checkpoint_metadata.get('fields_dict', {})
-            if checkpoint_fields != fields_dict:
-                logger.warning("Field definitions changed since checkpoint - starting fresh")
-                df_copy = df.copy()
-            elif checkpoint_metadata.get('overwrite_fields') != overwrite_fields:
-                logger.warning("Overwrite settings changed since checkpoint - starting fresh") 
-                df_copy = df.copy()
-        else:
-            df_copy = df.copy()
-        
-        # Prepare DataFrame - ensure all fields exist
-        for field in fields_dict.keys():
-            if field not in df_copy.columns:
-                df_copy[field] = None
-        
-        # Process rows
-        if self.config.enable_async:
-            # If async is enabled, use async processing even in sync method
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # We're already in an async context, can't use run()
-                    logger.warning("Async processing requested but already in async context, falling back to sync")
-                    return self._process_sync(df_copy, fields_dict, overwrite_fields, data_identifier, category)
-                else:
-                    return loop.run_until_complete(
-                        self._process_async(df_copy, fields_dict, overwrite_fields, data_identifier, category)
-                    )
-            except RuntimeError:
-                # No event loop, create one
-                return asyncio.run(self._process_async(df_copy, fields_dict, overwrite_fields, data_identifier, category))
-        else:
-            return self._process_sync(df_copy, fields_dict, overwrite_fields, data_identifier, category)
-    
-    async def enrich_dataframe_async(self,
-                                    df: pd.DataFrame,
-                                    category: str,
-                                    overwrite_fields: bool = None,
-                                    data_identifier: Optional[str] = None) -> pd.DataFrame:
-        """
-        Asynchronously enrich a DataFrame.
-        
-        Args:
-            df: DataFrame containing data to enrich
-            category: Field category to process
-            overwrite_fields: Whether to overwrite existing field values
-            data_identifier: Unique identifier for this data (used for checkpointing)
-            
-        Returns:
-            DataFrame with enriched data
+        try:
+            asyncio.get_running_loop()
+            raise RuntimeError(
+                "Enricher.run() cannot be called from inside an async context. "
+                "Use 'await enricher.run_async(...)' instead."
+            )
+        except RuntimeError as exc:
+            # Re-raise our own RuntimeError; swallow the "no running event loop" one
+            if "run_async" in str(exc):
+                raise
+        return asyncio.run(
+            self.run_async(df, category, overwrite_fields, data_identifier)
+        )
+
+    # -- async entry point -----------------------------------------------
+
+    async def run_async(
+        self,
+        df: pd.DataFrame,
+        category: str,
+        overwrite_fields: Optional[bool] = None,
+        data_identifier: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """Execute the pipeline for *category* across all rows of *df*.
+
+        Steps:
+            1. Validate category exists in FieldManager.
+            2. Validate field routing (every category field covered by exactly one step).
+            3. Load checkpoint (if any) and skip already-completed steps.
+            4. Execute pipeline.
+            5. Write results back to DataFrame (filtering ``__`` internal fields).
+            6. Clean up checkpoint on success.
         """
         if overwrite_fields is None:
             overwrite_fields = self.config.overwrite_fields
-            
-        # Use data_identifier for checkpointing, fallback to hash of DataFrame  
+
         if data_identifier is None:
-            data_identifier = f"dataframe_{hash(str(df.columns.tolist()) + str(len(df)))}"
-            
-        logger.info(f"Starting async enrichment of {len(df)} rows for category '{category}'")
-        
-        # Validate category
+            data_identifier = f"df_{hash(str(df.columns.tolist()) + str(len(df)))}"
+
+        # 1. Validate category
         if not self.field_manager.validate_category(category):
             available = ", ".join(self.field_manager.get_categories())
-            raise FieldValidationError(f"Category '{category}' not found. Available: {available}")
-        
-        # Get fields and prepare DataFrame
+            raise FieldValidationError(
+                f"Category '{category}' not found. Available: {available}"
+            )
+
+        # 2. Get field specs & validate routing
         fields_dict = self.field_manager.get_category_fields(category)
-        df_copy = df.copy()
-        for field in fields_dict.keys():
-            if field not in df_copy.columns:
-                df_copy[field] = None
-        
-        return await self._process_async(df_copy, fields_dict, overwrite_fields, data_identifier, category)
-    
-    def _process_sync(self,
-                     df: pd.DataFrame,
-                     fields_dict: Dict,
-                     overwrite_fields: bool,
-                     data_identifier: str,
-                     category: str) -> pd.DataFrame:
-        """
-        Synchronous processing of DataFrame rows.
-        
-        Args:
-            df: DataFrame to process
-            fields_dict: Fields to enrich
-            overwrite_fields: Whether to overwrite existing values
-            data_identifier: Unique identifier for checkpointing
-            category: Field category being processed
-            
-        Returns:
-            Processed DataFrame
-        """
-        total_rows = len(df)
-        errors = []
-        processed_count = 0
-        
-        # Create progress bar if enabled
-        progress_bar = None
-        if self.config.enable_progress_bar:
-            progress_bar = tqdm(total=total_rows, desc="Processing Rows")
-        
-        for idx, row in df.iterrows():
-            try:
-                # Check if we need to process this row
-                if not self._should_process_row(row, fields_dict, overwrite_fields):
-                    logger.debug(f"Skipping row {idx} - fields already populated")
-                    if progress_bar:
-                        progress_bar.update(1)
-                    continue
-                
-                # Process the row
-                result = self.processor.process_row(row, fields_dict)
-                
-                # Update the DataFrame
-                self._update_row(df, idx, result, fields_dict, overwrite_fields)
-                processed_count += 1
-                
-                # Call progress callback if provided
-                if self.config.progress_callback:
-                    self.config.progress_callback(idx + 1, total_rows)
-                
-                # Update progress bar
-                if progress_bar:
-                    progress_bar.update(1)
-                    
-                # Save checkpoint if enabled and at interval
-                if (self.config.enable_checkpointing and 
-                    processed_count % self.config.checkpoint_interval == 0):
-                    self.checkpoint_manager.save_checkpoint(
-                        df, data_identifier, category, idx, fields_dict, overwrite_fields
-                    )
-                
-                # Add delay between rows if configured
-                if idx < total_rows - 1 and self.config.row_delay > 0:
-                    time.sleep(self.config.row_delay)
-                    
-            except Exception as e:
-                error = EnrichmentError(f"Failed to process row: {e}", row_index=idx)
-                errors.append(error)
-                logger.error(f"Row {idx} processing failed: {e}")
-                
-                if progress_bar:
-                    progress_bar.update(1)
-                continue
-        
-        if progress_bar:
-            progress_bar.close()
-        
-        # Log summary
-        success_count = total_rows - len(errors)
-        logger.info(f"Processing complete: {success_count}/{total_rows} rows successful")
-        
-        if errors:
-            logger.warning(f"{len(errors)} rows failed processing")
-            for error in errors[:5]:  # Log first 5 errors
-                logger.warning(f"  Row {error.row_index}: {error.message}")
-        
-        # Clean up checkpoint files on successful completion
-        if success_count == total_rows:
-            self.checkpoint_manager.cleanup_checkpoints(data_identifier, category)
-        
-        return df
-    
-    async def _process_async(self,
-                            df: pd.DataFrame,
-                            fields_dict: Dict,
-                            overwrite_fields: bool,
-                            data_identifier: str,
-                            category: str) -> pd.DataFrame:
-        """
-        Asynchronous processing of DataFrame rows with concurrency control.
-        
-        Args:
-            df: DataFrame to process
-            fields_dict: Fields to enrich
-            overwrite_fields: Whether to overwrite existing values
-            data_identifier: Unique identifier for checkpointing
-            category: Field category being processed
-            
-        Returns:
-            Processed DataFrame
-        """
-        total_rows = len(df)
-        completed_count = 0
-        
-        # Create semaphore for concurrency control
-        semaphore = asyncio.Semaphore(self.config.max_workers)
-        
-        async def process_row_with_semaphore(idx: int, row: pd.Series) -> Optional[Dict]:
-            async with semaphore:
-                try:
-                    if not self._should_process_row(row, fields_dict, overwrite_fields):
-                        return None
-                    
-                    result = await self.processor.process_row_async(row, fields_dict)
-                    
-                    # Add delay between rows
-                    if self.config.row_delay > 0:
-                        await asyncio.sleep(self.config.row_delay)
-                    
-                    return {"idx": idx, "result": result}
-                    
-                except Exception as e:
-                    logger.error(f"Async row {idx} processing failed: {e}")
-                    return {"idx": idx, "error": e}
-        
-        # Process all rows concurrently
-        tasks = [
-            process_row_with_semaphore(idx, row)
-            for idx, row in df.iterrows()
-        ]
-        
-        # Execute with progress tracking
-        completed_tasks = []
-        if self.config.enable_progress_bar:
-            progress_bar = tqdm(total=total_rows, desc="Processing Rows (Async)")
-            
-            for task in asyncio.as_completed(tasks):
-                result = await task
-                completed_tasks.append(result)
-                progress_bar.update(1)
-                
-                # Save checkpoint periodically during async processing
-                if (self.config.enable_checkpointing and 
-                    len(completed_tasks) % self.config.checkpoint_interval == 0):
-                    # Find the highest processed index for checkpoint
-                    max_idx = max((r.get("idx", -1) for r in completed_tasks if r and "idx" in r), default=-1)
-                    if max_idx >= 0:
-                        self.checkpoint_manager.save_checkpoint(
-                            df, data_identifier, category, max_idx, fields_dict, overwrite_fields
-                        )
-                
-                if self.config.progress_callback:
-                    self.config.progress_callback(len(completed_tasks), total_rows)
-                    
-            progress_bar.close()
-        else:
-            completed_tasks = await asyncio.gather(*tasks)
-        
-        # Update DataFrame with results
-        errors = []
-        success_count = 0
-        
-        for task_result in completed_tasks:
-            if task_result is None:
-                continue  # Skipped row
-            
-            if "error" in task_result:
-                error = EnrichmentError(
-                    f"Failed to process row: {task_result['error']}", 
-                    row_index=task_result["idx"]
+        self._validate_field_routing(fields_dict)
+
+        # 3. Checkpoint resume
+        prior_step_results: dict[str, list[dict[str, Any]]] | None = None
+        completed_steps: list[str] = []
+        checkpoint_results: dict[str, list[dict[str, Any]]] = {}
+
+        cp = self._checkpoint.load(data_identifier, category)
+        if cp is not None:
+            # Validate checkpoint compatibility
+            if cp.total_rows != len(df):
+                logger.warning(
+                    f"Checkpoint row count mismatch ({cp.total_rows} vs {len(df)}), "
+                    "starting fresh"
                 )
-                errors.append(error)
+            elif cp.fields_dict != fields_dict:
+                logger.warning("Checkpoint fields_dict mismatch, starting fresh")
             else:
-                self._update_row(df, task_result["idx"], task_result["result"], fields_dict, overwrite_fields)
-                success_count += 1
-        
-        logger.info(f"Async processing complete: {success_count}/{total_rows} rows successful")
-        
-        if errors:
-            logger.warning(f"{len(errors)} rows failed processing")
-        
-        # Clean up checkpoint files on successful completion
-        if success_count == total_rows:
-            self.checkpoint_manager.cleanup_checkpoints(data_identifier, category)
-        
-        return df
-    
-    def _should_process_row(self,
-                           row: pd.Series,
-                           fields_dict: Dict,
-                           overwrite_fields: bool) -> bool:
-        """
-        Check if a row needs processing based on existing field values.
-        
-        Args:
-            row: Row to check
-            fields_dict: Fields that would be processed
-            overwrite_fields: Whether to overwrite existing values
-            
-        Returns:
-            True if row should be processed
-        """
-        if overwrite_fields:
-            return True
-        
-        # Check if any fields need processing
-        for field in fields_dict:
-            if field in row and pd.notna(row[field]) and row[field] != "":
-                continue  # Field already has value
-            else:
-                return True  # At least one field needs processing
-        
-        return False  # All fields already populated
-    
-    def _update_row(self,
-                   df: pd.DataFrame,
-                   idx: int,
-                   result: Dict,
-                   fields_dict: Dict,
-                   overwrite_fields: bool) -> None:
-        """
-        Update a DataFrame row with enrichment results.
-        
-        Args:
-            df: DataFrame to update
-            idx: Row index
-            result: Processing results
-            fields_dict: Fields being processed
-            overwrite_fields: Whether to overwrite existing values
-        """
-        for field in fields_dict:
-            # Skip if field has value and not overwriting
-            if not overwrite_fields and field in df.columns:
-                if pd.notna(df.at[idx, field]) and df.at[idx, field] != "":
+                prior_step_results = cp.step_results
+                completed_steps = list(cp.completed_steps)
+                checkpoint_results = dict(cp.step_results)
+                logger.info(
+                    f"Resuming from checkpoint: skipping {completed_steps}"
+                )
+
+        # 4. Convert DataFrame to rows
+        rows = df.to_dict(orient="records")
+
+        # 5. Build on_step_complete callback for checkpointing
+        # Track completed steps and results across callback invocations
+        cb_completed = list(completed_steps)
+        cb_results = dict(checkpoint_results)
+
+        def on_step_complete(step_name: str, step_row_results: list[dict[str, Any]]) -> None:
+            cb_completed.append(step_name)
+            cb_results[step_name] = step_row_results
+            self._checkpoint.save_step(
+                data_identifier=data_identifier,
+                category=category,
+                step_name=step_name,
+                step_row_results=step_row_results,
+                total_rows=len(rows),
+                fields_dict=fields_dict,
+                existing_completed=cb_completed[:-1],  # before this step
+                existing_results={k: v for k, v in cb_results.items() if k != step_name},
+            )
+
+        # 6. Execute pipeline
+        accumulated = await self.pipeline.execute(
+            rows=rows,
+            all_fields=fields_dict,
+            config=self.config,
+            prior_step_results=prior_step_results,
+            on_step_complete=on_step_complete,
+        )
+
+        # 7. Write results back to DataFrame
+        df_out = df.copy()
+        for idx in range(len(df_out)):
+            for key, value in accumulated[idx].items():
+                # Filter __ internal fields
+                if key.startswith("__"):
                     continue
-            
-            # Get the value from results
-            value = result.get(field)
-            
-            # Handle different value types
-            if isinstance(value, list):
-                # Convert list to comma-separated string
-                value = ', '.join(map(str, value))
-            elif value is None:
-                value = ""
-            else:
-                value = str(value)
-            
-            # Set the value
-            df.at[idx, field] = value
-    
-    def get_enrichment_info(self) -> Dict[str, any]:
+                # Respect overwrite_fields
+                if not overwrite_fields and key in df_out.columns:
+                    existing = df_out.at[df_out.index[idx], key]
+                    if pd.notna(existing) and existing != "":
+                        continue
+                df_out.at[df_out.index[idx], key] = value
+
+        # 8. Cleanup checkpoint on success
+        self._checkpoint.cleanup(data_identifier, category)
+
+        logger.info(
+            f"Enrichment complete: {len(df_out)} rows, category '{category}'"
+        )
+        return df_out
+
+    # -- validation ------------------------------------------------------
+
+    def _validate_field_routing(self, fields_dict: dict[str, dict[str, Any]]) -> None:
+        """Ensure every category field is produced by exactly one step.
+
+        Raises :class:`FieldValidationError` for missing or duplicate coverage.
+        Warns (but does not error) if a step produces fields not in the category
+        and not ``__``-prefixed.
         """
-        Get information about the current enrichment setup.
-        
-        Returns:
-            Dictionary with enrichment configuration info
-        """
-        return {
-            "chain_type": type(self.chain).__name__,
-            "field_manager_info": str(self.field_manager),
-            "config": {
-                "batch_size": self.config.batch_size,
-                "max_workers": self.config.max_workers,
-                "row_delay": self.config.row_delay,
-                "async_enabled": self.config.enable_async,
-                "progress_bar": self.config.enable_progress_bar,
-            },
-            "categories": self.field_manager.get_categories(),
-            "total_fields": self.field_manager.get_field_count()
+        category_fields = set(fields_dict.keys())
+        step_field_map: dict[str, list[str]] = {}  # field -> list of step names
+
+        all_step_fields: set[str] = set()
+        for step_name in self.pipeline.step_names:
+            step = self.pipeline.get_step(step_name)
+            for field_name in step.fields:
+                all_step_fields.add(field_name)
+                if field_name.startswith("__"):
+                    continue
+                step_field_map.setdefault(field_name, []).append(step_name)
+
+        # Missing fields: in category but not produced by any step
+        missing = category_fields - all_step_fields
+        if missing:
+            raise FieldValidationError(
+                f"Category fields not covered by any pipeline step: {sorted(missing)}"
+            )
+
+        # Duplicate fields: category field produced by >1 step
+        duplicates = {
+            f: steps for f, steps in step_field_map.items()
+            if f in category_fields and len(steps) > 1
         }
+        if duplicates:
+            raise FieldValidationError(
+                f"Category fields produced by multiple steps: {duplicates}"
+            )
+
+        # Extra fields: produced by steps but not in category (and not __)
+        extra = set(step_field_map.keys()) - category_fields
+        if extra:
+            warnings.warn(
+                f"Pipeline steps produce fields not in category: {sorted(extra)}",
+                stacklevel=2,
+            )
