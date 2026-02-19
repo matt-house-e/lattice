@@ -1,148 +1,117 @@
 """
 Unified configuration for the Lattice enrichment tool.
 
-Consolidates all configuration options into a single, well-documented
-configuration class with sensible defaults.
+Defaults are tuned for fast processing on OpenAI Tier 2+ accounts.
+For Tier 1 accounts, reduce max_workers to 5-10.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Callable, Dict, Any
-from pathlib import Path
+from typing import Optional, Callable
 
 
 @dataclass
 class EnrichmentConfig:
     """
-    Unified configuration for enrichment processes.
-    
-    Consolidates all configuration options that were previously
-    scattered across multiple config classes.
+    Configuration for enrichment pipelines.
+
+    Defaults are optimized for speed on typical API tier accounts.
+    Adjust max_workers based on your provider's rate limits.
+
+    Rate limit guidance (OpenAI GPT-4.1 nano/mini):
+      - Tier 1 ($5 spend):   max_workers=5-10   (500 RPM, 200K TPM)
+      - Tier 2 ($50 spend):  max_workers=20-50   (5K RPM, 2M TPM)
+      - Tier 3+ ($100+):     max_workers=50-100  (5K+ RPM, 4M+ TPM)
+      - Tier 5 ($1K+):       max_workers=100-200 (30K RPM, 150M TPM)
     """
-    
+
     # === LLM Configuration ===
     max_tokens: int = 4000
-    """Maximum tokens for LLM output"""
-    
-    temperature: float = 0.5
-    """LLM temperature (0.0-1.0)"""
-    
-    context_window: int = 20000
-    """Size of context window for LLM"""
-    
-    # === Processing Configuration ===
-    row_delay: float = 1.0
-    """Delay between processing rows in seconds (rate limiting)"""
-    
-    batch_size: int = 10
-    """Number of rows to process in each batch"""
-    
-    max_workers: int = 3
-    """Maximum number of concurrent workers for async processing"""
-    
+    """Maximum tokens for LLM output."""
+
+    temperature: float = 0.2
+    """LLM temperature. Low (0.1-0.3) is best for structured enrichment."""
+
+    # === Concurrency ===
+    max_workers: int = 10
+    """Concurrent rows per step (asyncio.Semaphore bound).
+    Real-world production uses 20-30. Default 10 is safe for Tier 1-2."""
+
+    # === Fields ===
     overwrite_fields: bool = False
-    """Whether to overwrite existing field values"""
-    
-    # === Performance & Reliability ===
-    enable_retries: bool = True
-    """Enable automatic retries for failed requests"""
-    
+    """Whether to overwrite existing field values in the DataFrame."""
+
+    # === Reliability ===
     max_retries: int = 3
-    """Maximum number of retries for failed requests"""
-    
-    retry_delay: float = 2.0
-    """Delay between retries in seconds"""
-    
-    # === Async & FastAPI Support ===
-    enable_async: bool = False
-    """Enable asynchronous processing"""
-    
-    progress_callback: Optional[Callable[[int, int], None]] = None
-    """Optional callback for progress updates (current, total)"""
-    
-    # === Caching (Future) ===
-    enable_caching: bool = False
-    """Enable caching of enrichment results"""
-    
-    cache_ttl: int = 3600
-    """Cache time-to-live in seconds"""
-    
-    # === Logging Configuration ===
+    """Maximum retry attempts for API errors (429, 500, timeouts)."""
+
+    retry_base_delay: float = 1.0
+    """Base delay for exponential backoff on API errors (seconds).
+    Actual delay: base_delay * 2^attempt + jitter."""
+
+    # === Logging ===
     log_level: str = "INFO"
-    """Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"""
-    
-    log_dir: Optional[str] = None
-    """Directory for log files (None = no file logging)"""
-    
+    """Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)."""
+
     enable_progress_bar: bool = True
-    """Enable progress bar display"""
-    
-    # === Checkpointing Configuration ===
+    """Show tqdm progress bar during pipeline execution."""
+
+    # === Checkpointing ===
     enable_checkpointing: bool = False
-    """Enable automatic checkpointing during enrichment"""
-    
-    checkpoint_interval: int = 100
-    """Number of rows processed between checkpoints"""
-    
+    """Save results after each step completes for crash recovery."""
+
     checkpoint_dir: Optional[str] = None
-    """Directory for checkpoint files (None = same as data file)"""
-    
+    """Directory for checkpoint files. None = temp directory."""
+
     auto_resume: bool = True
-    """Automatically resume from checkpoint if found"""
-    
+    """Automatically resume from checkpoint on re-run."""
+
+    # === Caching (Phase 3) ===
+    enable_caching: bool = False
+    """Enable input-hash cache to skip redundant API calls."""
+
+    cache_ttl: int = 3600
+    """Cache time-to-live in seconds."""
+
     # === Validation ===
     def __post_init__(self):
-        """Validate configuration values after initialization."""
         if not 0.0 <= self.temperature <= 2.0:
             raise ValueError(f"temperature must be between 0.0 and 2.0, got {self.temperature}")
-            
         if self.max_tokens <= 0:
             raise ValueError(f"max_tokens must be positive, got {self.max_tokens}")
-            
-        if self.row_delay < 0:
-            raise ValueError(f"row_delay must be non-negative, got {self.row_delay}")
-            
-        if self.batch_size <= 0:
-            raise ValueError(f"batch_size must be positive, got {self.batch_size}")
-            
         if self.max_workers <= 0:
             raise ValueError(f"max_workers must be positive, got {self.max_workers}")
+        if self.max_retries < 0:
+            raise ValueError(f"max_retries must be non-negative, got {self.max_retries}")
 
-        if self.checkpoint_interval <= 0:
-            raise ValueError(f"checkpoint_interval must be positive, got {self.checkpoint_interval}")
-    
+    # === Presets ===
     @classmethod
     def for_development(cls) -> 'EnrichmentConfig':
-        """Create configuration optimized for development."""
+        """Low concurrency, verbose logging. Safe for Tier 1 accounts."""
         return cls(
-            row_delay=0.5,  # Faster for testing
-            batch_size=5,   # Smaller batches
-            max_workers=2,  # Less resource usage
+            max_workers=5,
+            temperature=0.2,
             enable_progress_bar=True,
-            log_level="DEBUG"
+            log_level="DEBUG",
         )
-    
+
     @classmethod
     def for_production(cls) -> 'EnrichmentConfig':
-        """Create configuration optimized for production."""
+        """High concurrency with checkpointing. For Tier 2+ accounts."""
         return cls(
-            row_delay=2.0,      # Respect rate limits
-            batch_size=20,      # Larger batches
-            max_workers=5,      # More concurrency
-            enable_async=True,  # Async processing
-            enable_caching=True,# Cache results
-            enable_retries=True,# Retry on failure
-            log_level="INFO"
+            max_workers=30,
+            temperature=0.2,
+            enable_checkpointing=True,
+            max_retries=5,
+            log_level="INFO",
         )
-    
+
     @classmethod
-    def for_fast_api(cls) -> 'EnrichmentConfig':
-        """Create configuration optimized for FastAPI services."""
+    def for_server(cls) -> 'EnrichmentConfig':
+        """Async server context (FastAPI). No progress bars, high concurrency."""
         return cls(
-            enable_async=True,      # Must be async for FastAPI
-            batch_size=50,          # Large batches for efficiency
-            max_workers=10,         # High concurrency
-            enable_caching=True,    # Cache for duplicate requests
-            enable_retries=True,    # Resilience
-            enable_progress_bar=False,  # No console output
-            log_level="WARNING"     # Less verbose logging
+            max_workers=30,
+            temperature=0.2,
+            enable_progress_bar=False,
+            max_retries=5,
+            log_level="WARNING",
         )
