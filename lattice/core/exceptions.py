@@ -46,6 +46,19 @@ class ConfigurationError(EnrichmentError):
     pass
 
 
+class StepError(EnrichmentError):
+    """Raised when a pipeline step fails."""
+
+    def __init__(self, message: str, step_name: Optional[str] = None, **kwargs: Any):
+        self.step_name = step_name
+        super().__init__(message, **kwargs)
+
+
+class PipelineError(EnrichmentError):
+    """Raised when pipeline construction or execution fails."""
+    pass
+
+
 class PartialEnrichmentResult:
     """
     Container for enrichment results that may have some failures.
