@@ -1,28 +1,32 @@
-"""
-Lattice - CSV Enrichment Tool
+"""Lattice — Enrichment Pipeline Engine.
 
-A powerful tool for enriching CSV data using Large Language Models (LLM) 
-on a row-by-row basis with clean, production-ready architecture.
+A programmatic enrichment engine built on composable, column-oriented
+pipeline steps with Pydantic validation, checkpointing, and async concurrency.
 """
 
 # Set up default logging when package is imported
 from .utils.logger import setup_logging
 setup_logging(level="WARNING", format_type="console", include_timestamp=False)
 
-# Import main classes for clean public API using new structure
-from .core import TableEnricher, EnrichmentConfig, EnrichmentError, FieldValidationError
-from .chains import LLMChain, VectorStoreLLMChain
+# Public API
+from .core import Enricher, EnrichmentConfig, EnrichmentError, FieldValidationError
+from .pipeline import Pipeline
+from .steps import Step, StepContext, StepResult, FunctionStep, LLMStep
 from .data import FieldManager
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __author__ = "Lattice Team"
 
 __all__ = [
-    'TableEnricher', 
-    'LLMChain', 
-    'VectorStoreLLMChain',
-    'FieldManager', 
-    'EnrichmentConfig',
-    'EnrichmentError',
-    'FieldValidationError'
+    "Enricher",
+    "Pipeline",
+    "Step",
+    "StepContext",
+    "StepResult",
+    "FunctionStep",
+    "LLMStep",
+    "FieldManager",
+    "EnrichmentConfig",
+    "EnrichmentError",
+    "FieldValidationError",
 ]

@@ -1,17 +1,24 @@
-"""
-Core functionality for the Lattice enrichment tool.
-"""
+"""Core functionality for the Lattice enrichment tool."""
 
-from .enricher import TableEnricher
-from .processors import RowProcessor
+from .enricher import Enricher
+from .checkpoint import CheckpointManager, CheckpointData
 from .config import EnrichmentConfig
-from .exceptions import EnrichmentError, FieldValidationError, PartialEnrichmentResult
+from .exceptions import (
+    EnrichmentError,
+    FieldValidationError,
+    StepError,
+    PipelineError,
+    PartialEnrichmentResult,
+)
 
 __all__ = [
-    'TableEnricher',
-    'RowProcessor', 
-    'EnrichmentConfig',
-    'EnrichmentError',
-    'FieldValidationError',
-    'PartialEnrichmentResult'
+    "Enricher",
+    "CheckpointManager",
+    "CheckpointData",
+    "EnrichmentConfig",
+    "EnrichmentError",
+    "FieldValidationError",
+    "StepError",
+    "PipelineError",
+    "PartialEnrichmentResult",
 ]

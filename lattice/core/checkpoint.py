@@ -1,244 +1,179 @@
-"""
-Checkpoint utilities for the Lattice enrichment tool.
+"""Per-step checkpoint manager for column-oriented pipeline execution.
 
-Provides functionality to save and resume enrichment progress,
-preventing data loss during long-running enrichment processes.
+Saves pipeline progress after each step completes across all rows.
+Single JSON file per data_identifier + category.
 """
 
-import os
-import time
 import json
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Any
-import pandas as pd
+from typing import Any, Optional
 
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
+@dataclass
+class CheckpointData:
+    """Snapshot of pipeline progress loaded from a checkpoint file."""
+
+    timestamp: float
+    category: str
+    total_rows: int
+    fields_dict: dict[str, dict[str, Any]]
+    completed_steps: list[str]
+    step_results: dict[str, list[dict[str, Any]]]
+
+
 class CheckpointManager:
+    """Manages per-step checkpoint files for pipeline execution.
+
+    After each step finishes (across all rows), the full pipeline
+    state is written to a single JSON file.  On resume, completed
+    steps are skipped and their results are fed into downstream
+    dependency routing.
     """
-    Manages checkpointing operations for enrichment processes.
-    
-    Handles saving and loading checkpoint data to allow resuming
-    interrupted enrichment operations.
-    """
-    
-    def __init__(self, config):
+
+    def __init__(self, config: Any) -> None:
+        self._enabled = getattr(config, "enable_checkpointing", False)
+        self._auto_resume = getattr(config, "auto_resume", True)
+        self._checkpoint_dir: Path | None = None
+
+        raw_dir = getattr(config, "checkpoint_dir", None)
+        if raw_dir is not None:
+            self._checkpoint_dir = Path(raw_dir)
+
+    # -- path helpers ----------------------------------------------------
+
+    def _get_path(self, data_identifier: str, category: str) -> Path:
+        base_dir = self._checkpoint_dir or Path.cwd()
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_id = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in data_identifier)
+        safe_cat = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in category)
+        return base_dir / f"{safe_id}_{safe_cat}_checkpoint.json"
+
+    # -- public API ------------------------------------------------------
+
+    def save_step(
+        self,
+        data_identifier: str,
+        category: str,
+        step_name: str,
+        step_row_results: list[dict[str, Any]],
+        total_rows: int,
+        fields_dict: dict[str, dict[str, Any]],
+        existing_completed: list[str],
+        existing_results: dict[str, list[dict[str, Any]]],
+    ) -> bool:
+        """Write full pipeline state to disk after a step completes.
+
+        Returns True on success or when checkpointing is disabled (no-op).
         """
-        Initialize checkpoint manager.
-        
-        Args:
-            config: EnrichmentConfig instance with checkpoint settings
-        """
-        self.config = config
-        self.checkpoint_dir = config.checkpoint_dir
-    
-    def _get_checkpoint_path(self, base_path: str, category: str) -> Tuple[str, str]:
-        """
-        Generate checkpoint file paths.
-        
-        Args:
-            base_path: Original data file path or identifier
-            category: Field category being processed
-            
-        Returns:
-            Tuple of (data_checkpoint_path, metadata_checkpoint_path)
-        """
-        if self.checkpoint_dir:
-            checkpoint_dir = Path(self.checkpoint_dir)
-            checkpoint_dir.mkdir(exist_ok=True)
-        else:
-            # Use same directory as base path if it's a file path
-            if os.path.exists(os.path.dirname(base_path)) if os.path.dirname(base_path) else True:
-                checkpoint_dir = Path(os.path.dirname(base_path)) if os.path.dirname(base_path) else Path.cwd()
-            else:
-                checkpoint_dir = Path.cwd()
-        
-        # Create safe filename from base_path and category
-        base_name = Path(base_path).stem if os.path.exists(base_path) else str(hash(base_path))
-        safe_category = "".join(c for c in category if c.isalnum() or c in ('-', '_'))
-        
-        data_path = checkpoint_dir / f"{base_name}_{safe_category}_checkpoint.csv"
-        metadata_path = checkpoint_dir / f"{base_name}_{safe_category}_checkpoint.json"
-        
-        return str(data_path), str(metadata_path)
-    
-    def save_checkpoint(self, 
-                       df: pd.DataFrame,
-                       base_path: str,
-                       category: str,
-                       last_processed_idx: int,
-                       fields_dict: Dict,
-                       overwrite_fields: bool,
-                       additional_metadata: Optional[Dict] = None) -> bool:
-        """
-        Save current enrichment state to checkpoint files.
-        
-        Args:
-            df: Current DataFrame state
-            base_path: Original data file path or identifier
-            category: Field category being processed
-            last_processed_idx: Index of last successfully processed row
-            fields_dict: Fields being processed
-            overwrite_fields: Whether overwriting existing fields
-            additional_metadata: Optional additional metadata to save
-            
-        Returns:
-            bool: True if checkpoint saved successfully
-        """
-        if not self.config.enable_checkpointing:
+        if not self._enabled:
             return True
-            
+
+        # Merge the newly completed step into existing state
+        completed = list(existing_completed) + [step_name]
+        results = dict(existing_results)
+        results[step_name] = step_row_results
+
+        payload = {
+            "timestamp": time.time(),
+            "category": category,
+            "total_rows": total_rows,
+            "fields_dict": fields_dict,
+            "completed_steps": completed,
+            "step_results": results,
+        }
+
         try:
-            data_path, metadata_path = self._get_checkpoint_path(base_path, category)
-            
-            # Save DataFrame
-            df.to_csv(data_path, index=False)
-            
-            # Save metadata
-            metadata = {
-                'timestamp': time.time(),
-                'category': category,
-                'last_processed_idx': last_processed_idx,
-                'total_rows': len(df),
-                'fields_dict': fields_dict,
-                'overwrite_fields': overwrite_fields,
-                'config': {
-                    'batch_size': self.config.batch_size,
-                    'max_workers': self.config.max_workers,
-                    'row_delay': self.config.row_delay,
-                    'checkpoint_interval': self.config.checkpoint_interval
-                }
-            }
-            
-            if additional_metadata:
-                metadata.update(additional_metadata)
-            
-            with open(metadata_path, 'w') as f:
-                json.dump(metadata, f, indent=2)
-            
-            logger.info(f"Checkpoint saved at row {last_processed_idx}: {data_path}")
+            path = self._get_path(data_identifier, category)
+            with open(path, "w") as f:
+                json.dump(payload, f, indent=2, default=str)
+            logger.info(f"Checkpoint saved after step '{step_name}': {path}")
             return True
-            
         except Exception as e:
             logger.error(f"Failed to save checkpoint: {e}")
             return False
-    
-    def load_checkpoint(self, 
-                       base_path: str, 
-                       category: str) -> Optional[Tuple[pd.DataFrame, Dict[str, Any]]]:
-        """
-        Load checkpoint data if available.
-        
-        Args:
-            base_path: Original data file path or identifier
-            category: Field category being processed
-            
-        Returns:
-            Tuple of (DataFrame, metadata) if checkpoint found, None otherwise
-        """
-        if not self.config.enable_checkpointing or not self.config.auto_resume:
+
+    def load(self, data_identifier: str, category: str) -> Optional[CheckpointData]:
+        """Load checkpoint if enabled, auto_resume is on, file exists, and category matches."""
+        if not self._enabled or not self._auto_resume:
             return None
-            
+
+        path = self._get_path(data_identifier, category)
+        if not path.exists():
+            return None
+
         try:
-            data_path, metadata_path = self._get_checkpoint_path(base_path, category)
-            
-            # Check if both checkpoint files exist
-            if not os.path.exists(data_path) or not os.path.exists(metadata_path):
+            with open(path) as f:
+                raw = json.load(f)
+
+            if raw.get("category") != category:
+                logger.warning(
+                    f"Checkpoint category mismatch: expected '{category}', "
+                    f"got '{raw.get('category')}'"
+                )
                 return None
-            
-            # Load metadata first to validate
-            with open(metadata_path, 'r') as f:
-                metadata = json.load(f)
-            
-            # Validate metadata
-            if metadata.get('category') != category:
-                logger.warning(f"Checkpoint category mismatch: expected {category}, got {metadata.get('category')}")
-                return None
-            
-            # Load DataFrame
-            df = pd.read_csv(data_path)
-            
-            logger.info(f"Checkpoint loaded: {len(df)} rows, last processed: {metadata.get('last_processed_idx', 0)}")
-            return df, metadata
-            
+
+            data = CheckpointData(
+                timestamp=raw["timestamp"],
+                category=raw["category"],
+                total_rows=raw["total_rows"],
+                fields_dict=raw["fields_dict"],
+                completed_steps=raw["completed_steps"],
+                step_results=raw["step_results"],
+            )
+            logger.info(
+                f"Checkpoint loaded: {len(data.completed_steps)} steps completed "
+                f"({', '.join(data.completed_steps)})"
+            )
+            return data
         except Exception as e:
             logger.error(f"Failed to load checkpoint: {e}")
             return None
-    
-    def cleanup_checkpoints(self, base_path: str, category: str) -> bool:
-        """
-        Remove checkpoint files after successful completion.
-        
-        Args:
-            base_path: Original data file path or identifier
-            category: Field category that was processed
-            
-        Returns:
-            bool: True if cleanup successful
-        """
-        if not self.config.enable_checkpointing:
+
+    def cleanup(self, data_identifier: str, category: str) -> bool:
+        """Remove checkpoint file after successful pipeline completion."""
+        if not self._enabled:
             return True
-            
+
         try:
-            data_path, metadata_path = self._get_checkpoint_path(base_path, category)
-            
-            # Remove files if they exist
-            for path in [data_path, metadata_path]:
-                if os.path.exists(path):
-                    os.remove(path)
-                    logger.debug(f"Removed checkpoint file: {path}")
-            
-            logger.info(f"Checkpoint files cleaned up for {category}")
+            path = self._get_path(data_identifier, category)
+            if path.exists():
+                path.unlink()
+                logger.info(f"Checkpoint cleaned up: {path}")
             return True
-            
         except Exception as e:
-            logger.error(f"Failed to cleanup checkpoint files: {e}")
+            logger.error(f"Failed to cleanup checkpoint: {e}")
             return False
-    
-    def list_checkpoints(self) -> Dict[str, Dict]:
-        """
-        List available checkpoint files.
-        
-        Returns:
-            Dict mapping checkpoint identifiers to metadata
-        """
-        checkpoints = {}
-        
-        if not self.config.enable_checkpointing:
+
+    def list_checkpoints(self) -> dict[str, dict[str, Any]]:
+        """Scan checkpoint_dir for ``*_checkpoint.json`` files."""
+        checkpoints: dict[str, dict[str, Any]] = {}
+
+        if not self._enabled:
             return checkpoints
-            
-        checkpoint_dir = Path(self.config.checkpoint_dir) if self.config.checkpoint_dir else Path.cwd()
-        
-        if not checkpoint_dir.exists():
+
+        scan_dir = self._checkpoint_dir or Path.cwd()
+        if not scan_dir.exists():
             return checkpoints
-            
-        try:
-            # Find all checkpoint metadata files
-            for metadata_file in checkpoint_dir.glob("*_checkpoint.json"):
-                try:
-                    with open(metadata_file, 'r') as f:
-                        metadata = json.load(f)
-                    
-                    # Check if corresponding data file exists
-                    data_file = metadata_file.with_suffix('.csv')
-                    if data_file.exists():
-                        checkpoints[str(metadata_file.stem)] = {
-                            'metadata_path': str(metadata_file),
-                            'data_path': str(data_file),
-                            'category': metadata.get('category'),
-                            'last_processed_idx': metadata.get('last_processed_idx'),
-                            'total_rows': metadata.get('total_rows'),
-                            'timestamp': metadata.get('timestamp')
-                        }
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to read checkpoint metadata {metadata_file}: {e}")
-                    continue
-                    
-        except Exception as e:
-            logger.error(f"Failed to list checkpoints: {e}")
-            
+
+        for path in scan_dir.glob("*_checkpoint.json"):
+            try:
+                with open(path) as f:
+                    raw = json.load(f)
+                checkpoints[path.stem] = {
+                    "path": str(path),
+                    "category": raw.get("category"),
+                    "total_rows": raw.get("total_rows"),
+                    "completed_steps": raw.get("completed_steps", []),
+                    "timestamp": raw.get("timestamp"),
+                }
+            except Exception as e:
+                logger.warning(f"Failed to read checkpoint {path}: {e}")
+
         return checkpoints
