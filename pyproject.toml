@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lattice-enrichment"
-version = "0.2.0"
+version = "0.3.0"
 authors = [
   { name="Lattice Team", email="team@lattice.dev" },
 ]
-description = "A powerful tool for enriching CSV data using Large Language Models (LLM) on a row-by-row basis"
+description = "A composable pipeline engine for structured data enrichment using LLMs"
 readme = "README.md"
 requires-python = ">=3.9"
 classifiers = [
@@ -26,13 +26,10 @@ classifiers = [
 ]
 dependencies = [
     "pandas>=2.0.0",
-    "langchain-core>=0.3.0",
-    "langchain-openai>=0.3.0",
-    "langchain>=0.3.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
     "tqdm>=4.65.0",
-    "tenacity>=9.0.0",
     "python-dotenv>=1.0.0",
-    "tavily-python>=0.3.0",
 ]
 
 [project.optional-dependencies]
@@ -44,13 +41,8 @@ dev = [
     "isort>=5.12",
     "mypy>=1.0",
 ]
-vector = [
-    "faiss-cpu>=1.7.0",
-    "pymupdf>=1.23.0",
-    "ipython>=8.0.0",
-]
 all = [
-    "lattice-enrichment[dev,vector]"
+    "lattice-enrichment[dev]"
 ]
 
 [project.urls]
@@ -58,9 +50,6 @@ all = [
 "Bug Reports" = "https://github.com/lattice-team/lattice-enrichment/issues"
 "Source" = "https://github.com/lattice-team/lattice-enrichment"
 "Documentation" = "https://github.com/lattice-team/lattice-enrichment#readme"
-
-[project.scripts]
-lattice-enrich = "lattice.cli:main"
 
 [tool.hatch.version]
 path = "lattice/__init__.py"
@@ -121,10 +110,7 @@ strict_equality = true
 module = [
     "pandas.*",
     "tqdm.*",
-    "langchain.*",
-    "langchain_openai.*",
-    "langchain_core.*",
-    "tenacity.*",
+    "openai.*",
 ]
 ignore_missing_imports = true
 

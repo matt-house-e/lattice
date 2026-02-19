@@ -46,24 +46,10 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| 1 | Core pipeline engine: Step protocol, Pipeline, LLMStep, FunctionStep, Enricher rewrite | NOT STARTED |
+| 1 | Core pipeline engine: Step protocol, Pipeline, LLMStep, FunctionStep, Enricher rewrite | COMPLETE |
 | 2 | Web search + provider model: WebSearchStep, rate limiting, waterfall resolution | NOT STARTED |
 | 3 | Caching + cost tracking: Input-hash cache, per-step cost reports | NOT STARTED |
 | 4 | Polish: Docs, examples, CLI, PyPI publish | NOT STARTED |
-
-### Phase 1 Work Chunks (each = one session)
-
-| Chunk | Branch | What | Depends On |
-|-------|--------|------|------------|
-| 1A | `feature/pipeline-core` | Step protocol + FunctionStep + Pipeline + LLMStep + all unit tests | nothing |
-| 1B | `feature/enricher-rewrite` | Enricher rewrite + checkpoint rethink (per-step, not per-row) + integration tests | 1A merged |
-| 1C | `feature/v03-cleanup` | Delete old code, update deps/API, fix fields.py bug, update existing tests | 1B merged |
-
-### Important: Checkpoint Must Be Rethought (not ported)
-Column-oriented execution changes checkpoint granularity from per-row to per-step. After step 1 completes for all rows, save. Resume from last completed step. Current `CheckpointManager` has no concept of steps - this is redesigned in chunk 1B.
-
-### Important: Field Routing Validation
-Enricher must validate at `run()` time that every field in the requested category is covered by exactly one Pipeline step. Missing fields = error. Duplicate fields = error.
 
 ## Git Workflow
 

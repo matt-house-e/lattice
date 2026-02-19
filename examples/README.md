@@ -1,89 +1,63 @@
 # Lattice Examples
 
-This directory contains example configurations and sample data to help you get started with Lattice.
+This directory contains example configurations and sample data for Lattice.
 
 ## Files
 
-### Configuration Files (Always Committed)
-- **`field_categories.csv`** - Example field definitions for different enrichment categories
+- **`field_categories.csv`** - Example field definitions for enrichment categories
 - **`sample_data.csv`** - Sample company data for testing
-- **`test_web_enrichment.py`** - Example script demonstrating web-enhanced enrichment
 
-### Field Categories
+## Field Categories
 
-#### `business_analysis`
-Traditional business analysis fields using LLM reasoning:
+### `business_analysis`
+LLM-powered business analysis fields:
 - `market_size` - Total addressable market estimation
-- `competition_level` - Competitive landscape assessment  
+- `competition_level` - Competitive landscape assessment
 - `growth_potential` - Business growth evaluation
-
-#### `web_intelligence` 
-Web-enhanced fields using real-time search (requires Tavily API):
-- `recent_funding` - Latest funding rounds and investment information
-- `current_news` - Recent news articles and developments
-- `executive_team` - Current leadership team and key executives
-- `company_valuation` - Latest valuation or market cap information
-- `market_trends` - Current market trends affecting the company
 
 ## Usage
 
-### Basic Usage
+### Single LLM Step
 ```python
-from lattice import TableEnricher, FieldManager, LLMChain
-
-# Load field definitions
-field_manager = FieldManager.from_csv("examples/field_categories.csv")
-
-# Create LLM chain  
-chain = LLMChain.openai(api_key="your-openai-key")
-
-# Create enricher
-enricher = TableEnricher(chain=chain, field_manager=field_manager)
-
-# Load and enrich data
 import pandas as pd
+from lattice import Enricher, Pipeline, LLMStep, FieldManager
+
+pipeline = Pipeline([
+    LLMStep("analyze", fields=["market_size", "competition_level", "growth_potential"])
+])
+
+field_manager = FieldManager.from_csv("examples/field_categories.csv")
+enricher = Enricher(pipeline=pipeline, field_manager=field_manager)
+
 df = pd.read_csv("examples/sample_data.csv")
-result = enricher.enrich_dataframe(df, category="business_analysis")
+result = enricher.run(df, category="business_analysis")
+print(result)
 ```
 
-### Web-Enhanced Usage
+### Multi-Step Pipeline
 ```python
-from lattice.chains import WebEnrichedLLMChain
+from lattice import Enricher, Pipeline, FunctionStep, LLMStep, FieldManager
 
-# Create web-enhanced chain (requires Tavily API key)
-web_chain = WebEnrichedLLMChain.create(
-    api_key="your-openai-key",
-    tavily_api_key="your-tavily-key"
-)
+def lookup_funding(ctx):
+    company = ctx.row.get("name", "")
+    return {"funding_amount": f"Looked up {company}"}
 
-# Use web intelligence fields
-enricher = TableEnricher(chain=web_chain, field_manager=field_manager)
-result = enricher.enrich_dataframe(df, category="web_intelligence")
-```
+pipeline = Pipeline([
+    FunctionStep("lookup", fn=lookup_funding, fields=["funding_amount"]),
+    LLMStep("analyze", fields=["market_size"], depends_on=["lookup"]),
+])
 
-### Running the Example
-```bash
-# Set environment variables
-export OPENAI_API_KEY="your-openai-key"
-export TAVILY_API_KEY="your-tavily-key"  # Optional, for web features
+field_manager = FieldManager.from_csv("examples/field_categories.csv")
+enricher = Enricher(pipeline=pipeline, field_manager=field_manager)
 
-# Run the demonstration
-python examples/test_web_enrichment.py
+df = pd.read_csv("examples/sample_data.csv")
+result = enricher.run(df, category="business_analysis")
 ```
 
 ## API Keys
 
 ### Required
-- **OpenAI API Key**: Get from https://platform.openai.com/api-keys
-
-### Optional (for web features)
-- **Tavily API Key**: Get from https://tavily.com (free tier available)
-
-## Output Files
-
-Generated output files are saved to the `/data` directory and are git-ignored:
-- `data/web_enriched_sample_data.csv` - Results from web enrichment demo
-- `data/*` - All generated files
+- **OpenAI API Key**: Set `OPENAI_API_KEY` in your environment or `.env` file
 
 ## Customization
 
@@ -92,14 +66,8 @@ Edit `field_categories.csv` to add your own enrichment fields:
 
 ```csv
 Category,Field,Prompt,Instructions,Data_Type,Example_1
-my_category,my_field,Analyze this aspect of the company,Provide detailed analysis,String,Example output
+my_category,my_field,Analyze this aspect,Provide detailed analysis,String,Example output
 ```
 
 ### Custom Sample Data
-Replace `sample_data.csv` with your own company data. Required columns:
-- `name` - Company name
-- `description` - Company description
-- `industry` - Industry sector
-- `location` - Company location
-
-Additional columns will be passed as context to the LLM for analysis.
+Replace `sample_data.csv` with your own data. Any columns present will be passed as row context to pipeline steps.

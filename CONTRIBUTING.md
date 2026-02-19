@@ -45,8 +45,8 @@ Thank you for your interest in contributing to Lattice! This document provides g
 
 1. **Create a feature branch:**
    ```bash
-   git checkout develop
-   git pull origin develop
+   git checkout main
+   git pull origin main
    git checkout -b feature/your-feature-name
    ```
 
@@ -138,10 +138,12 @@ git commit -m "docs: update API documentation"
 ```
 lattice/
 ├── lattice/           # Main package
-│   ├── core/         # Core enrichment functionality
-│   ├── chains/       # LLM chain implementations
-│   ├── data/         # Data handling components
-│   └── vector_store/ # Vector store functionality
+│   ├── core/         # Enricher, config, checkpoint, exceptions
+│   ├── steps/        # Step protocol + built-in steps (LLMStep, FunctionStep)
+│   ├── pipeline/     # DAG resolution + column-oriented execution
+│   ├── schemas/      # Pydantic models
+│   ├── data/         # FieldManager (CSV field definitions)
+│   └── utils/        # Logging
 ├── tests/            # Test suite
 ├── examples/         # Usage examples
 └── docs/            # Documentation
@@ -158,7 +160,7 @@ python -m pytest
 python -m pytest --cov=lattice
 
 # Run specific test file
-python -m pytest tests/test_enrichment.py
+python -m pytest tests/test_enricher.py
 
 # Run with verbose output
 python -m pytest -v

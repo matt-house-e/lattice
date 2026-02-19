@@ -111,9 +111,16 @@ class FieldManager:
                     "type": row['Data_Type'] if pd.notna(row['Data_Type']) else "String"
                 }
                 
-                # Add examples if present
+                # Add examples if present (use name-based exclusion, not position)
+                KNOWN_COLUMNS = {
+                    'Category', 'Field', 'Prompt', 'Data_Type', 'Instructions',
+                    'Output_Format', 'Quality_Rules', 'Sources',
+                    'Good_Example', 'Bad_Example', 'Fallback',
+                }
                 examples = {}
-                for i, col in enumerate(df.columns[5:], start=1):
+                for i, col in enumerate(
+                    (c for c in df.columns if c not in KNOWN_COLUMNS), start=1
+                ):
                     if pd.notna(row[col]):
                         examples[f"example_{i}"] = row[col]
                 if examples:
