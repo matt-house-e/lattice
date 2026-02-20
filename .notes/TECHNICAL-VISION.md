@@ -327,22 +327,29 @@ def test_enrichment_accuracy():
 
 ## Implementation Priority (Updated Feb 2026)
 
-### Immediate: Foundation (Phases 2-3)
+### Immediate: Quality + DX (Phases 3-4)
 1. **API redesign** - `Pipeline.run(df)` as primary API, fields on steps, Enricher internal (Phase 2) ✅
 2. **Resilience** - Per-row error handling, API retry/backoff (Phase 2) ✅
 3. **Observability** - Progress reporting, cost aggregation (Phase 2) ✅
 4. **Config/code cleanup** - Remove dead fields, dead code, FieldManager → utility (Phase 2) ✅
-5. **Caching** - Input-hash cache for iterative development (Phase 3)
+5. **Field spec + dynamic prompt** - 7-key field spec validation, dynamic prompt builder (markdown+XML), `default` enforcement, model default → mini (Phase 3)
+6. **Caching** - Input-hash cache, filesystem JSON backend, TTL expiry, per-step cache control (Phase 4)
 
-### Ship: Polish (Phase 4)
-6. **Lifecycle hooks** - Callbacks for observability tools (Langfuse, etc.)
-7. **Working examples** - Real sample data, runnable scripts
-8. **CLI + PyPI** - `pip install lattice-enrichment`
+### Ship: Minimum Viable Distribution (Phase 5A)
+7. **Working examples** - 3-4 runnable scripts with sample data (including web search pattern)
+8. **README rewrite** - Real examples, install instructions, quick start
+9. **PyPI publish** - `pip install lattice-enrichment`
+
+### Power User Features (Phase 5B)
+10. **Lifecycle hooks** (#30) - Callbacks at pipeline/step/row boundaries for observability tools
+11. **Prompt customization** (#34) - Three-tier: default, header injection, full override
+12. **Web search utility** (#35) - Convenience function for common two-step pattern
+13. **CLI** - `lattice run --csv data.csv --fields fields.csv`
 
 ### Differentiation (Post-launch)
-9. **Provenance/sources** - Source attribution per field
-10. **Cross-row analysis** - Dataset-aware enrichment
-11. **Streaming output** - Progressive results
+14. **Provenance/sources** - Source attribution per field (#12)
+15. **Cross-row analysis** - Dataset-aware enrichment
+16. **Streaming output** - Progressive results (re-scope #11 for column-oriented model)
 
 ### Future Vision (unchanged)
 12. **Relationship extraction** - Graph building
@@ -353,11 +360,15 @@ def test_enrichment_accuracy():
 - **`Pipeline.run(df)` is the ONE way.** Enricher is internal. No FieldManager in public API.
 - **Fields live on steps.** LLMStep accepts inline field specs. No separate field registry.
 - **FieldManager → `load_fields()` utility.** CSV is a convenience, not a dependency.
-- **No built-in web search.** FunctionStep is the escape hatch for any data source.
+- **No built-in web search.** FunctionStep is the escape hatch for any data source. Web search uses two-step pattern (FunctionStep → LLMStep) with citations as visible output.
 - **LLMClient protocol + shipped adapters.** OpenAI default, Anthropic/Google as optional extras (~30 lines each). No litellm (too heavy).
 - **No langfuse/eval tooling.** Expose hooks; users bring their own observability.
 - **No waterfall resolution.** Source priority is user logic, not framework logic.
 - **Evals are user-level.** Lattice exposes data. Users evaluate correctness.
+- **Default model: gpt-4.1-mini.** Nano too limited for enrichment (no web search, hallucination risk with structured outputs). Mini matches GPT-4o at 83% cheaper. Users can override per-step.
+- **7-key field spec.** `prompt`, `type`, `format`, `enum`, `examples`, `bad_examples`, `default`. Research-backed from Clay, Instructor, and OpenAI cookbook analysis.
+- **Dynamic system prompt.** Markdown headers + XML data boundaries (OpenAI GPT-4.1 cookbook pattern). Only describes keys actually used. JSON in prompts avoided (performed poorly in OpenAI testing).
+- **Three-tier prompt customization.** Default dynamic → `system_prompt_header=` injection → `system_prompt=` full override.
 
 ---
 
