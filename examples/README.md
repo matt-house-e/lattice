@@ -4,39 +4,36 @@ This directory contains example configurations and sample data for Lattice.
 
 ## Files
 
-- **`field_categories.csv`** - Example field definitions for enrichment categories
+- **`demo.ipynb`** - Interactive notebook demonstrating all Phase 3 features
+- **`field_categories.csv`** - Example field definitions for CSV-based field loading
 - **`sample_data.csv`** - Sample company data for testing
 
-## Field Categories
+## Quick Start
 
-### `business_analysis`
-LLM-powered business analysis fields:
-- `market_size` - Total addressable market estimation
-- `competition_level` - Competitive landscape assessment
-- `growth_potential` - Business growth evaluation
-
-## Usage
-
-### Single LLM Step
+### Inline field specs (recommended)
 ```python
 import pandas as pd
-from lattice import Enricher, Pipeline, LLMStep, FieldManager
+from lattice import Pipeline, LLMStep
 
 pipeline = Pipeline([
-    LLMStep("analyze", fields=["market_size", "competition_level", "growth_potential"])
+    LLMStep("analyze", fields={
+        "market_size": "Estimate TAM in billions USD",
+        "competition": {
+            "prompt": "Rate competition level with key competitors",
+            "enum": ["Low", "Medium", "High"],
+            "default": "Unknown",
+        },
+    })
 ])
 
-field_manager = FieldManager.from_csv("examples/field_categories.csv")
-enricher = Enricher(pipeline=pipeline, field_manager=field_manager)
-
 df = pd.read_csv("examples/sample_data.csv")
-result = enricher.run(df, category="business_analysis")
-print(result)
+result = pipeline.run(df)
+print(result.data)
 ```
 
-### Multi-Step Pipeline
+### Multi-step pipeline
 ```python
-from lattice import Enricher, Pipeline, FunctionStep, LLMStep, FieldManager
+from lattice import Pipeline, FunctionStep, LLMStep
 
 def lookup_funding(ctx):
     company = ctx.row.get("name", "")
@@ -44,14 +41,22 @@ def lookup_funding(ctx):
 
 pipeline = Pipeline([
     FunctionStep("lookup", fn=lookup_funding, fields=["funding_amount"]),
-    LLMStep("analyze", fields=["market_size"], depends_on=["lookup"]),
+    LLMStep("analyze", fields={
+        "investment_thesis": "Write a one-sentence investment thesis using the funding data",
+    }, depends_on=["lookup"]),
 ])
 
-field_manager = FieldManager.from_csv("examples/field_categories.csv")
-enricher = Enricher(pipeline=pipeline, field_manager=field_manager)
+result = pipeline.run(df)
+```
 
-df = pd.read_csv("examples/sample_data.csv")
-result = enricher.run(df, category="business_analysis")
+### CSV field loading (for teams)
+```python
+from lattice import Pipeline, LLMStep
+from lattice.data import load_fields
+
+fields = load_fields("examples/field_categories.csv", category="business_analysis")
+pipeline = Pipeline([LLMStep("analyze", fields=fields)])
+result = pipeline.run(df)
 ```
 
 ## API Keys
@@ -59,15 +64,14 @@ result = enricher.run(df, category="business_analysis")
 ### Required
 - **OpenAI API Key**: Set `OPENAI_API_KEY` in your environment or `.env` file
 
-## Customization
-
-### Adding Custom Fields
-Edit `field_categories.csv` to add your own enrichment fields:
+## CSV Field Format
 
 ```csv
-Category,Field,Prompt,Instructions,Data_Type,Example_1
-my_category,my_field,Analyze this aspect,Provide detailed analysis,String,Example output
+Category,Field,Prompt,Type,Enum,Examples
+my_category,my_field,Analyze this aspect,String,,Example output
+my_category,risk,Rate risk level,String,"Low, Medium, High",High
 ```
 
-### Custom Sample Data
-Replace `sample_data.csv` with your own data. Any columns present will be passed as row context to pipeline steps.
+Required columns: `Category`, `Field`, `Prompt`. Optional: `Type`, `Format`, `Enum`, `Examples`, `Bad_Examples`, `Default`.
+
+Legacy columns (`Instructions`, `Data_Type`) are supported for backward compatibility.

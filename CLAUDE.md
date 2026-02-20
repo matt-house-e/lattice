@@ -77,7 +77,7 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 |-------|-------|--------|
 | 1 | Core pipeline engine: Step protocol, Pipeline, LLMStep, FunctionStep, Enricher rewrite | COMPLETE |
 | 2 | Resilience + API redesign: error handling, retries, progress, cost, Pipeline.run(df), fields on steps | COMPLETE |
-| 3 | Field spec + dynamic prompt (#33): 7-key field spec validation, dynamic prompt builder (markdown+XML), `default` enforcement, model default → gpt-4.1-mini, CSV loader update | NOT STARTED |
+| 3 | Field spec + dynamic prompt (#33): 7-key field spec validation, dynamic prompt builder (markdown+XML), `default` enforcement, model default → gpt-4.1-mini, CSV loader update | COMPLETE |
 | 4 | Caching (#17): Input-hash cache, filesystem JSON backend, TTL expiry, per-step cache control | NOT STARTED |
 | 5A | Ship (#18): Working examples, README rewrite, PyPI publish (`lattice-enrichment`) | NOT STARTED |
 | 5B | Power user features: Lifecycle hooks (#30), three-tier prompt customization (#34), web search utility (#35), CLI | NOT STARTED |

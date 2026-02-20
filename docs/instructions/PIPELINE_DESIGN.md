@@ -1,6 +1,6 @@
 # Pipeline Architecture Design
 
-> **Status**: Phases 1-2 COMPLETE. Phases 3-4 pending.
+> **Status**: Phases 1-3 COMPLETE. Phase 4 pending.
 > **Version**: v0.3
 > **Date**: February 2026
 
@@ -331,14 +331,9 @@ Optional validation at `run()` time:
 - Missing fields → `FieldValidationError` (fail fast)
 - No category concept — just a flat list of expected field names
 
-## System Prompt (Redesign — Phase 3)
+## System Prompt — Dynamic Prompt Builder (Phase 3)
 
-### Current (v0.3)
-Static `DEFAULT_SYSTEM_PROMPT` in `lattice/steps/llm.py`. ~50 lines. Field specs injected as raw JSON via `json.dumps()`. Uses `response_format={"type": "json_object"}` (legacy).
-
-### Planned: Dynamic Prompt Builder
-
-Follows OpenAI GPT-4.1 cookbook: **markdown headers for sections, XML tags for data boundaries**. JSON in prompts performs poorly per OpenAI's long-context testing.
+Implemented in `lattice/steps/prompt_builder.py`. Follows OpenAI GPT-4.1 cookbook: **markdown headers for sections, XML tags for data boundaries**. JSON in prompts performs poorly per OpenAI's long-context testing.
 
 **Structure:**
 ```markdown
@@ -494,19 +489,19 @@ Merged in #32. All issues closed: #19, #20, #23, #24, #25, #26, #27, #28, #29.
 - **LLMClient Protocol (#28):** `LLMClient` protocol + `OpenAIClient` (default), `AnthropicClient`, `GoogleClient` adapters. `base_url` shortcut for OpenAI-compatible providers. `LLMAPIError` wrapper for provider-agnostic retry.
 - **Dead Code Removal (#26) + Config Cleanup (#19):** Removed `VectorStoreError`, `LLMError`, `EnrichmentSpec`, `StructuredResult`. Config was already clean from Phase 1C.
 
-## Phase 3: Field Spec Redesign + Dynamic Prompt (Epic #33)
+## Phase 3: Field Spec Redesign + Dynamic Prompt (Epic #33) — COMPLETE
 
-The prompt engineering layer is the core of enrichment quality. This phase rebuilds it from research. **This is the highest-impact work remaining** — everything Lattice produces flows through the system prompt.
+The prompt engineering layer is the core of enrichment quality. This phase rebuilt it from research.
 
-### Scope
-1. **7-key field spec validation** — Enforce schema (`prompt`, `type`, `format`, `enum`, `examples`, `bad_examples`, `default`) with Pydantic validation on LLMStep construction. Reject unknown keys. `prompt` required, all others optional.
-2. **Dynamic system prompt builder** — Markdown headers + XML data boundaries (OpenAI GPT-4.1 cookbook). Only describe keys actually present across this step's fields. Static content at top (enables OpenAI prompt caching), variable data at bottom.
-3. **`default` enforcement in Python** — If field has `default` and LLM returns refusal language ("Unable to determine", "N/A", etc.), replace with default value post-extraction.
-4. **Default model → `gpt-4.1-mini`** — Change hardcoded default. Nano stays available per-step.
-5. **CSV loader update** — Map new 7-key spec from CSV columns. Concatenate legacy `Guidance` column into `prompt`. Support `examples`/`bad_examples` columns.
+### What was built
+1. **7-key field spec validation** — `FieldSpec` Pydantic model (`lattice/schemas/field_spec.py`) with `extra="forbid"`. Enforced on LLMStep construction via `_normalize_field_specs()`. Rejects unknown keys. `prompt` required, all others optional.
+2. **Dynamic system prompt builder** — `lattice/steps/prompt_builder.py`. Markdown headers + XML data boundaries (OpenAI GPT-4.1 cookbook). Only describes keys actually present across this step's fields. Static content at top (enables prompt caching), variable data at bottom, sandwich pattern reminder at end.
+3. **`default` enforcement in Python** — `LLMStep._apply_defaults()` replaces refusal language ("Unable to determine", "N/A", etc.) with field's `default` value post-extraction. Uses `model_fields_set` to distinguish "default not set" from "default=None".
+4. **Default model → `gpt-4.1-mini`** — Changed from `gpt-4.1-nano`. Temperature fallback → 0.2 (was 0.5). Nano stays available per-step.
+5. **CSV loader update** — Rewritten for new 7-key format. Backward-compatible: legacy `Instructions`/`Guidance` columns concatenated into `prompt`, `Data_Type` → `Type` fallback. Fixed `get_category_fields()` bug (was stripping examples).
 
-### Out of scope for Phase 3
-- Structured Outputs migration (`json_schema` + `strict`) — requires dynamic Pydantic model generation, separate effort
+### Out of scope (deferred)
+- Structured Outputs migration (`json_schema` + `strict`) — requires dynamic Pydantic model generation
 - Regex validation on `format` — future enhancement
 - `system_prompt_header` — Phase 5B (#34)
 

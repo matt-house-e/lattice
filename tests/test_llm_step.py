@@ -8,12 +8,13 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from lattice.core.exceptions import StepError
 from lattice.schemas.base import UsageInfo
+from lattice.schemas.field_spec import FieldSpec
 from lattice.steps.base import Step, StepContext, StepResult
-from lattice.steps.llm import DEFAULT_SYSTEM_PROMPT, LLMStep
+from lattice.steps.llm import LLMStep
 from lattice.steps.providers.base import LLMAPIError, LLMResponse
 
 
@@ -21,9 +22,9 @@ from lattice.steps.providers.base import LLMAPIError, LLMResponse
 
 
 def _make_ctx(**overrides: Any) -> StepContext:
-    defaults: dict[str, Any] = dict(
+    defaults: dict = dict(
         row={"company": "Acme", "industry": "Tech"},
-        fields={"market_size": {"prompt": "Estimate market size", "data_type": "String"}},
+        fields={"market_size": {"prompt": "Estimate market size"}},
         prior_results={},
     )
     defaults.update(overrides)
@@ -38,12 +39,12 @@ def _mock_llm_response(content: str, prompt_tokens: int = 10, completion_tokens:
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
-            model="gpt-4.1-nano",
+            model="gpt-4.1-mini",
         ),
     )
 
 
-def _make_mock_client(responses: list[LLMResponse] | LLMResponse) -> AsyncMock:
+def _make_mock_client(responses):
     """Create a mock LLMClient with preset responses."""
     mock = AsyncMock()
     if isinstance(responses, list):
@@ -64,10 +65,10 @@ class TestLLMStepConstruction:
     def test_defaults(self):
         step = LLMStep(name="llm", fields=["f1"])
         assert step.depends_on == []
-        assert step.model == "gpt-4.1-nano"
+        assert step.model == "gpt-4.1-mini"
         assert step.temperature is None
         assert step.max_tokens is None
-        assert step.system_prompt == DEFAULT_SYSTEM_PROMPT
+        assert step._custom_system_prompt is None
         assert step.max_retries == 2
 
     def test_custom_params(self):
@@ -83,7 +84,25 @@ class TestLLMStepConstruction:
         )
         assert step.model == "gpt-4o"
         assert step.temperature == 0.2
-        assert step.system_prompt == "You are a bot."
+        assert step._custom_system_prompt == "You are a bot."
+
+    def test_field_spec_validation_rejects_unknown_keys(self):
+        with pytest.raises(ValidationError, match="extra_forbidden"):
+            LLMStep("llm", fields={
+                "f1": {"prompt": "test", "unknown_key": "bad"},
+            })
+
+    def test_field_spec_validation_rejects_invalid_type(self):
+        with pytest.raises(ValidationError):
+            LLMStep("llm", fields={
+                "f1": {"prompt": "test", "type": "InvalidType"},
+            })
+
+    def test_field_spec_validation_requires_prompt(self):
+        with pytest.raises(ValidationError, match="prompt"):
+            LLMStep("llm", fields={
+                "f1": {"type": "String"},  # missing prompt
+            })
 
 
 # -- client resolution ---------------------------------------------------
@@ -131,36 +150,59 @@ class TestLLMStepClient:
 
 class TestLLMStepMessageBuilding:
     def test_includes_row_and_fields(self):
-        step = LLMStep(name="llm", fields=["market_size"])
+        step = LLMStep(name="llm", fields={"market_size": "Estimate market size"})
         ctx = _make_ctx()
         msg = step._build_system_message(ctx)
 
         assert "Acme" in msg
         assert "market_size" in msg
-        assert "--- DATA ---" in msg
+        # Uses XML data boundaries (not old JSON injection)
+        assert "<row_data>" in msg
+        assert "<field_specifications>" in msg
 
     def test_includes_prior_results(self):
-        step = LLMStep(name="llm", fields=["f1"])
+        step = LLMStep(name="llm", fields={"f1": "test"})
         ctx = _make_ctx(prior_results={"search_ctx": "relevant info"})
         msg = step._build_system_message(ctx)
 
-        assert "Prior Step Results" in msg
+        assert "<prior_results>" in msg
         assert "relevant info" in msg
 
     def test_omits_prior_results_when_empty(self):
-        step = LLMStep(name="llm", fields=["f1"])
+        step = LLMStep(name="llm", fields={"f1": "test"})
         ctx = _make_ctx(prior_results={})
         msg = step._build_system_message(ctx)
 
-        assert "Prior Step Results" not in msg
+        assert "<prior_results>" not in msg
 
     def test_custom_system_prompt(self):
-        step = LLMStep(name="llm", fields=["f1"], system_prompt="Custom prompt.")
+        step = LLMStep(name="llm", fields={"f1": "test"}, system_prompt="Custom prompt.")
         ctx = _make_ctx()
         msg = step._build_system_message(ctx)
 
         assert msg.startswith("Custom prompt.")
-        assert DEFAULT_SYSTEM_PROMPT not in msg
+        # Custom prompt still gets XML data appended
+        assert "<row_data>" in msg
+
+    def test_dynamic_prompt_describes_used_keys_only(self):
+        step = LLMStep(name="llm", fields={
+            "f1": {"prompt": "test", "enum": ["A", "B"]},
+        })
+        ctx = _make_ctx()
+        msg = step._build_system_message(ctx)
+
+        # enum is used → described
+        assert "enum" in msg.lower()
+        # format is NOT used → not described
+        assert "**format**" not in msg
+
+    def test_sandwich_pattern_reminder(self):
+        step = LLMStep(name="llm", fields={"f1": "test"})
+        ctx = _make_ctx()
+        msg = step._build_system_message(ctx)
+
+        # Reminder section at end
+        assert msg.strip().endswith("No additional text.")
 
 
 # -- successful run ------------------------------------------------------
@@ -171,7 +213,7 @@ class TestLLMStepRun:
     async def test_successful_run(self):
         resp = _mock_llm_response(json.dumps({"market_size": "Large"}))
         mock_client = _make_mock_client(resp)
-        step = LLMStep(name="llm", fields=["market_size"], client=mock_client)
+        step = LLMStep(name="llm", fields={"market_size": "Estimate market size"}, client=mock_client)
 
         result = await step.run(_make_ctx())
 
@@ -179,14 +221,14 @@ class TestLLMStepRun:
         assert result.values == {"market_size": "Large"}
         assert result.usage is not None
         assert result.usage.total_tokens == 15
-        assert result.usage.model == "gpt-4.1-nano"
+        assert result.usage.model == "gpt-4.1-mini"
         assert result.metadata["attempts"] == 1
 
     @pytest.mark.asyncio
     async def test_filters_to_declared_fields(self):
         resp = _mock_llm_response(json.dumps({"market_size": "Large", "extra": "junk"}))
         mock_client = _make_mock_client(resp)
-        step = LLMStep(name="llm", fields=["market_size"], client=mock_client)
+        step = LLMStep(name="llm", fields={"market_size": "Estimate"}, client=mock_client)
 
         result = await step.run(_make_ctx())
         assert "extra" not in result.values
@@ -196,7 +238,7 @@ class TestLLMStepRun:
     async def test_temperature_from_config(self):
         resp = _mock_llm_response(json.dumps({"f1": "val"}))
         mock_client = _make_mock_client(resp)
-        step = LLMStep(name="llm", fields=["f1"], client=mock_client)
+        step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
 
         config = SimpleNamespace(temperature=0.1, max_tokens=500, max_workers=3)
         ctx = _make_ctx(config=config)
@@ -205,6 +247,92 @@ class TestLLMStepRun:
         call_kwargs = mock_client.complete.call_args
         assert call_kwargs.kwargs["temperature"] == 0.1
         assert call_kwargs.kwargs["max_tokens"] == 500
+
+    @pytest.mark.asyncio
+    async def test_temperature_fallback_is_0_2(self):
+        """Without config, temperature falls back to 0.2 (not 0.5)."""
+        resp = _mock_llm_response(json.dumps({"f1": "val"}))
+        mock_client = _make_mock_client(resp)
+        step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
+
+        await step.run(_make_ctx())
+
+        call_kwargs = mock_client.complete.call_args
+        assert call_kwargs.kwargs["temperature"] == 0.2
+
+
+# -- default enforcement -------------------------------------------------
+
+
+class TestDefaultEnforcement:
+    @pytest.mark.asyncio
+    async def test_refusal_replaced_with_default(self):
+        resp = _mock_llm_response(json.dumps({"f1": "Unable to determine"}))
+        mock_client = _make_mock_client(resp)
+        step = LLMStep(name="llm", fields={
+            "f1": {"prompt": "test", "default": "N/A"},
+        }, client=mock_client)
+
+        result = await step.run(_make_ctx())
+        assert result.values["f1"] == "N/A"
+
+    @pytest.mark.asyncio
+    async def test_null_replaced_with_default(self):
+        resp = _mock_llm_response(json.dumps({"f1": None}))
+        mock_client = _make_mock_client(resp)
+        step = LLMStep(name="llm", fields={
+            "f1": {"prompt": "test", "default": "fallback"},
+        }, client=mock_client)
+
+        result = await step.run(_make_ctx())
+        assert result.values["f1"] == "fallback"
+
+    @pytest.mark.asyncio
+    async def test_empty_string_replaced_with_default(self):
+        resp = _mock_llm_response(json.dumps({"f1": "  "}))
+        mock_client = _make_mock_client(resp)
+        step = LLMStep(name="llm", fields={
+            "f1": {"prompt": "test", "default": "fallback"},
+        }, client=mock_client)
+
+        result = await step.run(_make_ctx())
+        assert result.values["f1"] == "fallback"
+
+    @pytest.mark.asyncio
+    async def test_no_default_leaves_refusal_alone(self):
+        """Without default set, refusal text is left as-is."""
+        resp = _mock_llm_response(json.dumps({"f1": "Unable to determine"}))
+        mock_client = _make_mock_client(resp)
+        step = LLMStep(name="llm", fields={
+            "f1": {"prompt": "test"},  # no default
+        }, client=mock_client)
+
+        result = await step.run(_make_ctx())
+        assert result.values["f1"] == "Unable to determine"
+
+    @pytest.mark.asyncio
+    async def test_non_refusal_value_not_replaced(self):
+        """Normal values are NOT replaced by default."""
+        resp = _mock_llm_response(json.dumps({"f1": "Actual answer"}))
+        mock_client = _make_mock_client(resp)
+        step = LLMStep(name="llm", fields={
+            "f1": {"prompt": "test", "default": "fallback"},
+        }, client=mock_client)
+
+        result = await step.run(_make_ctx())
+        assert result.values["f1"] == "Actual answer"
+
+    @pytest.mark.asyncio
+    async def test_default_none_replaces_refusal(self):
+        """default=None explicitly set should replace refusals with None."""
+        resp = _mock_llm_response(json.dumps({"f1": "Unknown"}))
+        mock_client = _make_mock_client(resp)
+        step = LLMStep(name="llm", fields={
+            "f1": {"prompt": "test", "default": None},
+        }, client=mock_client)
+
+        result = await step.run(_make_ctx())
+        assert result.values["f1"] is None
 
 
 # -- retries on validation/parse error -----------------------------------
@@ -216,7 +344,7 @@ class TestLLMStepRetries:
         bad_resp = _mock_llm_response("not json at all")
         good_resp = _mock_llm_response(json.dumps({"f1": "ok"}))
         mock_client = _make_mock_client([bad_resp, good_resp])
-        step = LLMStep(name="llm", fields=["f1"], client=mock_client, max_retries=2)
+        step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client, max_retries=2)
 
         result = await step.run(_make_ctx())
         assert result.values == {"f1": "ok"}
@@ -267,7 +395,7 @@ class TestLLMStepAPIRetries:
         config = SimpleNamespace(
             temperature=0.2, max_tokens=100, max_retries=2, retry_base_delay=0.01,
         )
-        step = LLMStep(name="llm", fields=["f1"], client=mock_client)
+        step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
 
         result = await step.run(_make_ctx(config=config))
         assert result.values == {"f1": "ok"}
@@ -286,7 +414,7 @@ class TestLLMStepAPIRetries:
         config = SimpleNamespace(
             temperature=0.2, max_tokens=100, max_retries=2, retry_base_delay=0.01,
         )
-        step = LLMStep(name="llm", fields=["f1"], client=mock_client)
+        step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
 
         result = await step.run(_make_ctx(config=config))
         assert result.values == {"f1": "ok"}
@@ -300,7 +428,7 @@ class TestLLMStepAPIRetries:
         config = SimpleNamespace(
             temperature=0.2, max_tokens=100, max_retries=1, retry_base_delay=0.01,
         )
-        step = LLMStep(name="llm", fields=["f1"], client=mock_client)
+        step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
 
         with pytest.raises(StepError, match="API error after 2 retries"):
             await step.run(_make_ctx(config=config))
@@ -318,7 +446,7 @@ class TestLLMStepAPIRetries:
         config = SimpleNamespace(
             temperature=0.2, max_tokens=100, max_retries=2, retry_base_delay=0.001,
         )
-        step = LLMStep(name="llm", fields=["f1"], client=mock_client)
+        step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
 
         result = await step.run(_make_ctx(config=config))
         assert result.values == {"f1": "ok"}
@@ -327,13 +455,11 @@ class TestLLMStepAPIRetries:
     async def test_parse_error_inside_api_retry(self):
         """Parse error on first API attempt, API error on second, success on third."""
         bad_parse_resp = _mock_llm_response("not json")
-        good_resp = _mock_llm_response(json.dumps({"f1": "ok"}))
         mock_client = AsyncMock()
         mock_client.complete = AsyncMock(
             side_effect=[
                 bad_parse_resp,  # parse attempt 1 fails
                 bad_parse_resp,  # parse attempt 2 fails → parse retries exhausted → StepError
-                # But StepError is not LLMAPIError, so it won't trigger API retry
             ]
         )
         config = SimpleNamespace(

@@ -137,8 +137,9 @@ class Pipeline:
     def _collect_field_specs(self) -> dict[str, dict[str, Any]]:
         """Collect field specs from all steps.
 
-        LLMSteps with inline field specs (dict fields) contribute their specs.
-        FunctionSteps and LLMSteps with list fields contribute empty specs.
+        LLMSteps with inline field specs (FieldSpec objects) contribute their
+        specs serialised as dicts.  FunctionSteps and LLMSteps with list fields
+        contribute empty specs.
         """
         all_fields: dict[str, dict[str, Any]] = {}
         for step in self._steps:
@@ -148,7 +149,12 @@ class Pipeline:
                 if field_name.startswith("__"):
                     continue
                 if field_name in field_specs:
-                    all_fields[field_name] = field_specs[field_name]
+                    spec = field_specs[field_name]
+                    # FieldSpec objects → dict; plain dicts pass through
+                    if hasattr(spec, "model_dump"):
+                        all_fields[field_name] = spec.model_dump(exclude_none=True)
+                    else:
+                        all_fields[field_name] = spec
                 elif field_name not in all_fields:
                     all_fields[field_name] = {}
         return all_fields
