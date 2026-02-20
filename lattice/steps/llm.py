@@ -17,6 +17,19 @@ from ..utils.logger import get_logger
 from .base import StepContext, StepResult
 from .prompt_builder import build_system_message
 from .providers.base import LLMAPIError, LLMClient, LLMResponse
+from .providers.openai import OpenAIClient
+from .schema_builder import build_json_schema, build_response_model
+
+# Optional provider imports for structured output auto-detection
+try:
+    from .providers.anthropic import AnthropicClient as _AnthropicClient
+except ImportError:
+    _AnthropicClient = None
+
+try:
+    from .providers.google import GoogleClient as _GoogleClient
+except ImportError:
+    _GoogleClient = None
 
 logger = get_logger(__name__)
 
@@ -119,8 +132,6 @@ class LLMStep:
     def _resolve_client(self) -> LLMClient:
         """Lazily create or return the LLMClient."""
         if self._client is None:
-            from .providers.openai import OpenAIClient
-
             self._client = OpenAIClient(
                 api_key=self.api_key,
                 base_url=self.base_url,
@@ -141,8 +152,6 @@ class LLMStep:
           - structured_outputs=True → force json_schema
           - structured_outputs=False → force json_object
         """
-        from .providers.openai import OpenAIClient
-
         # Explicit override
         if self._structured_outputs_param is False:
             return {"type": "json_object"}
@@ -150,7 +159,6 @@ class LLMStep:
         if self._structured_outputs_param is True:
             # Force on — requires field specs
             if self._field_specs:
-                from .schema_builder import build_json_schema
                 return build_json_schema(self._field_specs)
             return {"type": "json_object"}
 
@@ -166,23 +174,12 @@ class LLMStep:
 
         # Known providers that support structured outputs (json_schema)
         if self._client is not None and not isinstance(self._client, OpenAIClient):
-            # Check for Anthropic/Google — both support json_schema now
-            _supports_structured = False
-            try:
-                from .providers.anthropic import AnthropicClient
-                if isinstance(self._client, AnthropicClient):
-                    _supports_structured = True
-            except ImportError:
-                pass
-            try:
-                from .providers.google import GoogleClient
-                if isinstance(self._client, GoogleClient):
-                    _supports_structured = True
-            except ImportError:
-                pass
+            _supports_structured = (
+                (_AnthropicClient is not None and isinstance(self._client, _AnthropicClient))
+                or (_GoogleClient is not None and isinstance(self._client, _GoogleClient))
+            )
 
             if _supports_structured:
-                from .schema_builder import build_json_schema
                 return build_json_schema(self._field_specs)
 
             # Unknown custom client → json_object (safe fallback)
@@ -193,7 +190,6 @@ class LLMStep:
             return {"type": "json_object"}
 
         # Native OpenAI → json_schema
-        from .schema_builder import build_json_schema
         return build_json_schema(self._field_specs)
 
     # -- message building ------------------------------------------------
@@ -288,7 +284,6 @@ class LLMStep:
                         # Validate: use dynamic model for structured outputs,
                         # otherwise fall back to self.schema
                         if self._use_structured_outputs:
-                            from .schema_builder import build_response_model
                             dynamic_model = build_response_model(self._field_specs)
                             validated = dynamic_model.model_validate(parsed)
                         else:
