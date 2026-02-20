@@ -88,7 +88,7 @@ class LLMStep:
         name: str,
         fields: list[str] | dict[str, str | dict],  # Phase 2: inline specs
         depends_on: list[str] = None,
-        model: str = "gpt-4.1-nano",
+        model: str = "gpt-4.1-mini",
         temperature: float = None,    # Falls back to config
         max_tokens: int = None,       # Falls back to config
         system_prompt: str = None,    # Falls back to built-in enrichment prompt
@@ -102,10 +102,40 @@ class LLMStep:
     async def run(self, ctx: StepContext) -> StepResult: ...
 ```
 
-**Fields parameter (Phase 2):**
+**Fields parameter (Phase 2 → redesigned Phase 3):**
 - `list[str]` — field names only, specs come from external source (backward compat)
 - `dict[str, str]` — shorthand: `{"market_size": "Estimate TAM"}` → prompt only
-- `dict[str, dict]` — full spec: `{"market_size": {"prompt": "...", "type": "String", "instructions": "...", "examples": [...]}}`
+- `dict[str, dict]` — full spec with 7 supported keys:
+
+| Key | Type | Required | Purpose |
+|-----|------|----------|---------|
+| `prompt` | `str` | Yes | The extraction instruction |
+| `type` | `str` | No | Data type: `String`, `Number`, `Boolean`, `Date`, `List[String]`, `JSON` (default: `String`) |
+| `format` | `str` | No | Output format pattern (e.g. `"YYYY-MM-DD"`, `"$X.XB"`, `"X/10"`) |
+| `enum` | `list[str]` | No | Constrained value list (e.g. `["Low", "Medium", "High"]`) |
+| `examples` | `list[str]` | No | Good output examples showing expected style |
+| `bad_examples` | `list[str]` | No | Anti-patterns to avoid |
+| `default` | `Any` | No | Fallback value when data is insufficient (enforced in Python) |
+
+Example:
+```python
+LLMStep("analyze", fields={
+    "market_size": "Estimate TAM in billions USD",  # shorthand
+    "risk_level": {                                  # full spec
+        "prompt": "Assess investment risk based on market and competitive data",
+        "type": "String",
+        "enum": ["Low", "Medium", "High"],
+        "default": "Unknown",
+        "examples": ["High", "Medium"],
+        "bad_examples": ["Moderately high", "3/5"],
+    },
+    "revenue": {
+        "prompt": "Estimate annual revenue",
+        "type": "Number",
+        "format": "$X.XB",
+    },
+})
+```
 
 When fields is a dict, LLMStep uses specs directly in `_build_system_message()` — no FieldManager needed.
 
@@ -181,6 +211,41 @@ Pipeline([
 ```
 
 No Tavily dependency. No provider abstraction. No "waterfall resolution." Users write a function; Lattice orchestrates it.
+
+**Web search with citations (recommended pattern):**
+
+OpenAI's web search + structured output in one call is unreliable (truncation bugs). The two-step pattern works:
+
+```python
+async def web_research(row):
+    """FunctionStep: calls OpenAI Responses API with web search."""
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI()
+    response = await client.responses.create(
+        model="gpt-4.1-mini",  # nano doesn't support web search
+        tools=[{"type": "web_search", "search_context_size": "medium"}],
+        input=f"Research {row['company']}: market position, competitors, recent news",
+        include=["web_search_call.action.sources"],
+    )
+    sources = []
+    for item in response.output:
+        if item.type == "message":
+            for block in item.content:
+                for ann in getattr(block, 'annotations', []):
+                    if ann.type == "url_citation":
+                        sources.append(ann.url)
+    return {"__web_context": response.output_text, "sources": sources}
+
+Pipeline([
+    FunctionStep("research", fn=web_research, fields=["__web_context", "sources"]),
+    LLMStep("analyze", fields={
+        "market_size": {"prompt": "Estimate TAM based on the research context", "format": "$X.XB"},
+        "competition": {"prompt": "Rate competition level", "enum": ["Low", "Medium", "High"]},
+    }, depends_on=["research"]),
+])
+```
+
+`__web_context` is internal (filtered from output). `sources` is visible — users get citation URLs per row. The LLMStep sees web context in `prior_results` via `depends_on`.
 
 ## Primary API: Pipeline.run()
 
@@ -266,9 +331,79 @@ Optional validation at `run()` time:
 - Missing fields → `FieldValidationError` (fail fast)
 - No category concept — just a flat list of expected field names
 
-## System Prompt
+## System Prompt (Redesign — Phase 3)
 
-The LLMStep default system prompt (`DEFAULT_SYSTEM_PROMPT` in `lattice/steps/llm.py`) is ~50 lines of carefully crafted prompt engineering that instructs the LLM to act as a "structured data enrichment engine." It was ported from the v0.2 `LLMChain._create_default_prompt()` and significantly affects output quality.
+### Current (v0.3)
+Static `DEFAULT_SYSTEM_PROMPT` in `lattice/steps/llm.py`. ~50 lines. Field specs injected as raw JSON via `json.dumps()`. Uses `response_format={"type": "json_object"}` (legacy).
+
+### Planned: Dynamic Prompt Builder
+
+Follows OpenAI GPT-4.1 cookbook: **markdown headers for sections, XML tags for data boundaries**. JSON in prompts performs poorly per OpenAI's long-context testing.
+
+**Structure:**
+```markdown
+# Role
+You are a structured data enrichment engine...
+
+# Field Specification Keys
+[DYNAMIC: only describe keys actually present across this step's fields]
+- prompt: the extraction instruction
+- type: expected output type
+[only if any field uses enum:]
+- enum: value MUST be one of these options verbatim
+[only if any field uses format:]
+- format: specific output format pattern
+[etc.]
+
+# Output Rules
+- Return ONLY valid JSON. No prose, no code fences.
+- Keys MUST be exactly the field names below.
+[DYNAMIC: enum/default rules only if relevant]
+
+<row_data>
+{"company": "Acme Corp", "industry": "Cloud"}
+</row_data>
+
+<field_specifications>
+<field name="market_size">
+  <prompt>Estimate the total addressable market</prompt>
+  <type>Number</type>
+  <format>$X.XB</format>
+</field>
+<field name="risk_level">
+  <prompt>Assess investment risk</prompt>
+  <enum>Low, Medium, High</enum>
+  <default>Unknown</default>
+</field>
+</field_specifications>
+
+<prior_results>
+[only if step has dependencies]
+</prior_results>
+```
+
+**Key principles:**
+- Static content at top (enables OpenAI prompt caching)
+- Variable content (row data, field specs) at bottom
+- Only include field spec key descriptions for keys actually used
+- XML per-field blocks only include defined keys (no empty tags)
+- Sandwich pattern: key constraints reiterated after data for long-context reliability
+
+### Three-Tier Prompt Customization
+
+1. **Default** — Dynamic prompt builder handles everything
+2. **`system_prompt_header=`** — Inject domain context before field specs: `"You are analyzing B2B SaaS companies in the European market."`
+3. **`system_prompt=`** — Full override (existing, power users own the entire prompt)
+
+### Future: Structured Outputs Migration
+
+Move from `response_format={"type": "json_object"}` (legacy) to `{"type": "json_schema", "strict": true}`. This enables:
+- Enum fields enforced at grammar level (constrained decoding)
+- Type enforcement (Number fields can't produce strings)
+- Dynamically built Pydantic model from field specs at runtime
+- Eliminates need for most parse retries
+
+Research: `docs/research/prompt-engineering.md`
 
 ## Usage Examples
 
@@ -359,17 +494,58 @@ Merged in #32. All issues closed: #19, #20, #23, #24, #25, #26, #27, #28, #29.
 - **LLMClient Protocol (#28):** `LLMClient` protocol + `OpenAIClient` (default), `AnthropicClient`, `GoogleClient` adapters. `base_url` shortcut for OpenAI-compatible providers. `LLMAPIError` wrapper for provider-agnostic retry.
 - **Dead Code Removal (#26) + Config Cleanup (#19):** Removed `VectorStoreError`, `LLMError`, `EnrichmentSpec`, `StructuredResult`. Config was already clean from Phase 1C.
 
-## Phase 3: Caching (Epic #17)
+## Phase 3: Field Spec Redesign + Dynamic Prompt (Epic #33)
 
-Input-hash cache: `hash(step_name + row_data + field_specs)` → cached result. Filesystem backend (JSON). TTL-based expiry. Manual bypass. Per-step enable/disable.
+The prompt engineering layer is the core of enrichment quality. This phase rebuilds it from research. **This is the highest-impact work remaining** — everything Lattice produces flows through the system prompt.
 
-## Phase 4: Polish
+### Scope
+1. **7-key field spec validation** — Enforce schema (`prompt`, `type`, `format`, `enum`, `examples`, `bad_examples`, `default`) with Pydantic validation on LLMStep construction. Reject unknown keys. `prompt` required, all others optional.
+2. **Dynamic system prompt builder** — Markdown headers + XML data boundaries (OpenAI GPT-4.1 cookbook). Only describe keys actually present across this step's fields. Static content at top (enables OpenAI prompt caching), variable data at bottom.
+3. **`default` enforcement in Python** — If field has `default` and LLM returns refusal language ("Unable to determine", "N/A", etc.), replace with default value post-extraction.
+4. **Default model → `gpt-4.1-mini`** — Change hardcoded default. Nano stays available per-step.
+5. **CSV loader update** — Map new 7-key spec from CSV columns. Concatenate legacy `Guidance` column into `prompt`. Support `examples`/`bad_examples` columns.
 
-- Lifecycle hooks for observability (#30) — callbacks at pipeline/step/row boundaries
-- Working examples with sample data
-- CLI: `lattice run --csv data.csv --fields fields.csv`
-- PyPI publish: `pip install lattice-enrichment`
-- README rewrite with real examples
+### Out of scope for Phase 3
+- Structured Outputs migration (`json_schema` + `strict`) — requires dynamic Pydantic model generation, separate effort
+- Regex validation on `format` — future enhancement
+- `system_prompt_header` — Phase 5B (#34)
+
+## Phase 4: Caching (Epic #17)
+
+Input-hash cache for iterative development. Without caching, changing one field in a 3-step pipeline re-runs every API call for every row. This is the single biggest DX improvement.
+
+### Scope
+1. **Input-hash key** — `hash(step_name + row_data + field_specs + model)` → deterministic cache key
+2. **Filesystem JSON backend** — Simple, zero deps, works everywhere
+3. **TTL-based expiry** — `cache_ttl` already in `EnrichmentConfig` (unused), wire it up
+4. **Per-step control** — `LLMStep(..., cache=False)` to bypass
+5. **Pipeline-level control** — `EnrichmentConfig(enable_caching=True)` (already exists, wire it up)
+
+**Note:** `enable_caching` and `cache_ttl` are already on `EnrichmentConfig` from Phase 1 — they're just not wired to anything. This phase makes them real.
+
+## Phase 5A: Ship (Epic #18)
+
+Minimum viable distribution. Get Lattice into users' hands.
+
+- **Working examples** — 3-4 runnable scripts with sample data: simple enrichment, multi-step with deps, web search two-step pattern, Anthropic/Google provider usage
+- **README rewrite** — Real examples, install instructions, quick start
+- **PyPI publish** — `pip install lattice-enrichment`
+- **#21 docs fix** — Update github-standards.md for v0.3 components (quick win)
+
+## Phase 5B: Power User Features
+
+- **Lifecycle hooks (#30)** — `EnrichmentHooks` with callbacks at pipeline/step/row boundaries. Enables Langfuse/Datadog/structlog integration without being dependencies.
+- **Three-tier prompt customization (#34)** — `system_prompt_header=` injection. Depends on Phase 3's dynamic prompt builder.
+- **Web search utility (#35)** — `web_search()` convenience function reducing boilerplate for the common two-step pattern.
+- **CLI** — `lattice run --csv data.csv --fields fields.csv`
+
+## Backlog Triage (Feb 2026)
+
+| # | Issue | Decision | Reasoning |
+|---|-------|----------|-----------|
+| **#13** | Eval suite | **Closed (won't-fix)** | Conflicts with design principle: "Evals are user-level, not library-level." Lattice exposes data; users run their own evals. |
+| **#11** | Streaming output | **Kept, re-scope** | Written for v0.2 row-oriented model. In column-oriented execution, "streaming" = step-level progress (already have tqdm) or row-level callbacks (that's #30 hooks). May merge into #30. |
+| **#12** | Sources/provenance | **Kept, deprioritized** | Partially addressed by web search two-step pattern (`sources` column). Full provenance is a post-launch differentiator per TECHNICAL-VISION.md. |
 
 ## Design Decisions Log
 
@@ -384,3 +560,9 @@ Input-hash cache: `hash(step_name + row_data + field_specs)` → cached result. 
 | No litellm dependency | Feb 2026 | Too heavy (~30 transitive deps). Protocol + thin adapters achieves the same with zero required deps. |
 | No langfuse/eval dependency | Feb 2026 | Evals are application-level. Lattice exposes hooks for observability tools to plug in. |
 | Phase 2 = Resilience + API redesign | Feb 2026 | Foundation gaps + API simplification must happen before PyPI publish. |
+| Default model → gpt-4.1-mini | Feb 2026 | Nano too limited: poor complex retrieval, no web search support, hallucination risk with structured outputs. Mini is "standout star," matches GPT-4o at 83% cheaper. Users can still set nano per-step for simple classification. |
+| 7-key field spec (drop `instructions`) | Feb 2026 | Research-backed: `prompt`, `type`, `format`, `enum`, `examples`, `bad_examples`, `default`. Merged `instructions`/`guidance` into `prompt` — other keys already cover structured concerns. |
+| Dynamic system prompt | Feb 2026 | Only describe field spec keys actually used. Saves tokens, avoids confusing gpt-4.1's literal instruction following with irrelevant sections. |
+| Markdown headers + XML data boundaries | Feb 2026 | OpenAI GPT-4.1 cookbook recommendation. JSON in prompts "performed particularly poorly" in their long-context testing. |
+| Web search = two-step FunctionStep → LLMStep | Feb 2026 | OpenAI web search + structured output in one call is broken (truncation). Two-step avoids this. Citations flow as visible `sources` column. |
+| Three-tier prompt customization | Feb 2026 | Default (dynamic), `system_prompt_header=` (domain injection), `system_prompt=` (full override). Covers 99% of use cases without complexity. |
