@@ -24,6 +24,7 @@ from typing import Any, Awaitable, Callable
 from ..steps.base import StepContext
 
 _VALID_CONTEXT_SIZES = frozenset({"low", "medium", "high"})
+_VALID_TOOL_TYPES = frozenset({"web_search", "web_search_preview"})
 
 
 def web_search(
@@ -33,6 +34,9 @@ def web_search(
     search_context_size: str = "medium",
     api_key: str | None = None,
     include_sources: bool = True,
+    user_location: dict[str, str] | None = None,
+    allowed_domains: list[str] | None = None,
+    tool_type: str = "web_search",
 ) -> Callable[[StepContext], Awaitable[dict[str, Any]]]:
     """Factory returning an async callable for ``FunctionStep``.
 
@@ -45,6 +49,16 @@ def web_search(
             context from search results.
         api_key: OpenAI API key.  Falls back to ``OPENAI_API_KEY`` env var.
         include_sources: If True, extract URL citations from the response.
+        user_location: Geographic bias for search results.  Dict with optional
+            keys: ``country`` (ISO 3166-1 two-letter), ``city``, ``region``,
+            ``timezone`` (IANA).  Example: ``{"country": "US", "city": "New York"}``.
+            A ``"type": "approximate"`` entry is added automatically.
+        allowed_domains: Restrict search results to these domains (up to 100).
+            Only supported with ``tool_type="web_search"`` (GA).
+            Example: ``["crunchbase.com", "linkedin.com", "sec.gov"]``.
+        tool_type: ``"web_search"`` (GA, cheaper at $10/1k calls) or
+            ``"web_search_preview"`` (legacy, $25/1k calls for non-reasoning
+            models).  GA supports domain filtering.  Defaults to ``"web_search"``.
 
     Returns:
         ``{"__web_context": str, "sources": list[str]}``
@@ -54,6 +68,16 @@ def web_search(
         raise ValueError(
             f"search_context_size must be one of {sorted(_VALID_CONTEXT_SIZES)}, "
             f"got {search_context_size!r}"
+        )
+    if tool_type not in _VALID_TOOL_TYPES:
+        raise ValueError(
+            f"tool_type must be one of {sorted(_VALID_TOOL_TYPES)}, "
+            f"got {tool_type!r}"
+        )
+    if allowed_domains and tool_type != "web_search":
+        raise ValueError(
+            "allowed_domains requires tool_type='web_search' (GA). "
+            "Domain filtering is not supported with 'web_search_preview'."
         )
 
     async def _search(ctx: StepContext) -> dict[str, Any]:
@@ -75,10 +99,22 @@ def web_search(
         key = api_key or os.environ.get("OPENAI_API_KEY")
         client = AsyncOpenAI(api_key=key)
 
+        # Build tool config
+        tool_config: dict[str, Any] = {
+            "type": tool_type,
+            "search_context_size": search_context_size,
+        }
+        if user_location is not None:
+            loc = dict(user_location)
+            loc.setdefault("type", "approximate")
+            tool_config["user_location"] = loc
+        if allowed_domains:
+            tool_config["filters"] = {"allowed_domains": allowed_domains}
+
         try:
             response = await client.responses.create(
                 model=model,
-                tools=[{"type": "web_search_preview", "search_context_size": search_context_size}],
+                tools=[tool_config],
                 input=formatted_query,
             )
 

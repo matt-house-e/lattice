@@ -59,6 +59,19 @@ class AnthropicClient:
         if system_content:
             kwargs["system"] = system_content
 
+        # Structured outputs: Anthropic uses output_config.format (GA)
+        # json_schema → constrained decoding; json_object → no equivalent, skip
+        if response_format and response_format.get("type") == "json_schema":
+            inner = response_format.get("json_schema", {})
+            schema = inner.get("schema", {})
+            if schema:
+                kwargs["output_config"] = {
+                    "format": {
+                        "type": "json_schema",
+                        "schema": schema,
+                    }
+                }
+
         try:
             from anthropic import APIError, APITimeoutError, RateLimitError
 

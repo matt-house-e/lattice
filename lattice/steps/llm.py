@@ -164,8 +164,28 @@ class LLMStep:
         if not self._field_specs:
             return {"type": "json_object"}
 
-        # Non-OpenAI client → json_object
+        # Known providers that support structured outputs (json_schema)
         if self._client is not None and not isinstance(self._client, OpenAIClient):
+            # Check for Anthropic/Google — both support json_schema now
+            _supports_structured = False
+            try:
+                from .providers.anthropic import AnthropicClient
+                if isinstance(self._client, AnthropicClient):
+                    _supports_structured = True
+            except ImportError:
+                pass
+            try:
+                from .providers.google import GoogleClient
+                if isinstance(self._client, GoogleClient):
+                    _supports_structured = True
+            except ImportError:
+                pass
+
+            if _supports_structured:
+                from .schema_builder import build_json_schema
+                return build_json_schema(self._field_specs)
+
+            # Unknown custom client → json_object (safe fallback)
             return {"type": "json_object"}
 
         # OpenAI with base_url → json_object (third-party compatibility)

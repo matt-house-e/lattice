@@ -539,10 +539,26 @@ class TestStructuredOutputs:
         assert step._use_structured_outputs is False
 
     def test_auto_off_for_non_openai_client(self):
-        """Non-OpenAI client → json_object."""
+        """Unknown custom client → json_object."""
         mock_client = AsyncMock()
         step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
         assert step._use_structured_outputs is False
+
+    def test_auto_on_for_anthropic_client(self):
+        """AnthropicClient + dict fields → json_schema (constrained decoding)."""
+        from lattice.steps.providers.anthropic import AnthropicClient
+        client = AnthropicClient(api_key="test")
+        step = LLMStep(name="llm", fields={"f1": "test"}, client=client)
+        assert step._use_structured_outputs is True
+        assert step._response_format["type"] == "json_schema"
+
+    def test_auto_on_for_google_client(self):
+        """GoogleClient + dict fields → json_schema."""
+        from lattice.steps.providers.google import GoogleClient
+        client = GoogleClient(api_key="test")
+        step = LLMStep(name="llm", fields={"f1": "test"}, client=client)
+        assert step._use_structured_outputs is True
+        assert step._response_format["type"] == "json_schema"
 
     def test_auto_off_for_base_url(self):
         """base_url set → json_object (third-party provider)."""

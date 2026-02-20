@@ -61,8 +61,17 @@ class GoogleClient:
             }
             if system_instruction:
                 config["system_instruction"] = system_instruction
-            if response_format and response_format.get("type") == "json_object":
-                config["response_mime_type"] = "application/json"
+            if response_format:
+                fmt_type = response_format.get("type")
+                if fmt_type == "json_schema":
+                    # Structured outputs: extract schema, pass as response_json_schema
+                    inner = response_format.get("json_schema", {})
+                    schema = inner.get("schema", {})
+                    config["response_mime_type"] = "application/json"
+                    if schema:
+                        config["response_json_schema"] = schema
+                elif fmt_type == "json_object":
+                    config["response_mime_type"] = "application/json"
 
             response = await client.aio.models.generate_content(
                 model=model,

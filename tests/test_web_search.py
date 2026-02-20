@@ -132,7 +132,7 @@ class TestAPICall:
 
             call_kwargs = mock_client.responses.create.call_args.kwargs
             assert call_kwargs["model"] == "gpt-4.1"
-            assert call_kwargs["tools"] == [{"type": "web_search_preview", "search_context_size": "high"}]
+            assert call_kwargs["tools"] == [{"type": "web_search", "search_context_size": "high"}]
 
     @pytest.mark.asyncio
     async def test_returns_web_context_and_sources(self):
@@ -262,6 +262,169 @@ class TestCitationExtraction:
 
         assert len(result["sources"]) == 3
         assert "https://a.com" in result["sources"]
+
+
+# ---------------------------------------------------------------------------
+# FunctionStep compatibility
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Tool type
+# ---------------------------------------------------------------------------
+
+
+class TestToolType:
+    def test_default_is_ga(self):
+        """Default tool_type is 'web_search' (GA, cheaper)."""
+        fn = web_search("test")
+        assert asyncio.iscoroutinefunction(fn)
+
+    def test_invalid_tool_type_raises(self):
+        with pytest.raises(ValueError, match="tool_type"):
+            web_search("test", tool_type="bad_type")
+
+    def test_valid_tool_types(self):
+        for tt in ("web_search", "web_search_preview"):
+            fn = web_search("test", tool_type=tt)
+            assert asyncio.iscoroutinefunction(fn)
+
+    @pytest.mark.asyncio
+    async def test_tool_type_passed_to_api(self):
+        fn = web_search("test query", tool_type="web_search_preview")
+        ctx = _make_ctx()
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.responses.create = AsyncMock(return_value=_mock_response())
+            mock_cls.return_value = mock_client
+
+            await fn(ctx)
+
+            call_kwargs = mock_client.responses.create.call_args.kwargs
+            assert call_kwargs["tools"][0]["type"] == "web_search_preview"
+
+    @pytest.mark.asyncio
+    async def test_ga_tool_type_in_api_call(self):
+        fn = web_search("test query")  # default = web_search
+        ctx = _make_ctx()
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.responses.create = AsyncMock(return_value=_mock_response())
+            mock_cls.return_value = mock_client
+
+            await fn(ctx)
+
+            call_kwargs = mock_client.responses.create.call_args.kwargs
+            assert call_kwargs["tools"][0]["type"] == "web_search"
+
+
+# ---------------------------------------------------------------------------
+# User location
+# ---------------------------------------------------------------------------
+
+
+class TestUserLocation:
+    @pytest.mark.asyncio
+    async def test_user_location_passed_to_api(self):
+        fn = web_search(
+            "test query",
+            user_location={"country": "GB", "city": "London"},
+        )
+        ctx = _make_ctx()
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.responses.create = AsyncMock(return_value=_mock_response())
+            mock_cls.return_value = mock_client
+
+            await fn(ctx)
+
+            call_kwargs = mock_client.responses.create.call_args.kwargs
+            tool = call_kwargs["tools"][0]
+            assert tool["user_location"]["country"] == "GB"
+            assert tool["user_location"]["city"] == "London"
+            assert tool["user_location"]["type"] == "approximate"
+
+    @pytest.mark.asyncio
+    async def test_user_location_adds_type_automatically(self):
+        fn = web_search("test", user_location={"country": "US"})
+        ctx = _make_ctx()
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.responses.create = AsyncMock(return_value=_mock_response())
+            mock_cls.return_value = mock_client
+
+            await fn(ctx)
+
+            tool = mock_client.responses.create.call_args.kwargs["tools"][0]
+            assert tool["user_location"]["type"] == "approximate"
+
+    @pytest.mark.asyncio
+    async def test_no_user_location_omitted(self):
+        fn = web_search("test")
+        ctx = _make_ctx()
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.responses.create = AsyncMock(return_value=_mock_response())
+            mock_cls.return_value = mock_client
+
+            await fn(ctx)
+
+            tool = mock_client.responses.create.call_args.kwargs["tools"][0]
+            assert "user_location" not in tool
+
+
+# ---------------------------------------------------------------------------
+# Allowed domains
+# ---------------------------------------------------------------------------
+
+
+class TestAllowedDomains:
+    @pytest.mark.asyncio
+    async def test_allowed_domains_passed_as_filters(self):
+        fn = web_search(
+            "test query",
+            allowed_domains=["crunchbase.com", "linkedin.com"],
+        )
+        ctx = _make_ctx()
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.responses.create = AsyncMock(return_value=_mock_response())
+            mock_cls.return_value = mock_client
+
+            await fn(ctx)
+
+            tool = mock_client.responses.create.call_args.kwargs["tools"][0]
+            assert tool["filters"]["allowed_domains"] == ["crunchbase.com", "linkedin.com"]
+
+    @pytest.mark.asyncio
+    async def test_no_domains_omits_filters(self):
+        fn = web_search("test")
+        ctx = _make_ctx()
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.responses.create = AsyncMock(return_value=_mock_response())
+            mock_cls.return_value = mock_client
+
+            await fn(ctx)
+
+            tool = mock_client.responses.create.call_args.kwargs["tools"][0]
+            assert "filters" not in tool
+
+    def test_allowed_domains_with_preview_raises(self):
+        """Domain filtering only works with GA tool type."""
+        with pytest.raises(ValueError, match="allowed_domains requires"):
+            web_search(
+                "test",
+                allowed_domains=["example.com"],
+                tool_type="web_search_preview",
+            )
 
 
 # ---------------------------------------------------------------------------
