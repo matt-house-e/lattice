@@ -20,6 +20,13 @@ class StepUsage(BaseModel):
     total_tokens: int = 0
     rows_processed: int = 0
     model: str = ""
+    cache_hits: int = 0
+    cache_misses: int = 0
+
+    @property
+    def cache_hit_rate(self) -> float:
+        total = self.cache_hits + self.cache_misses
+        return self.cache_hits / total if total > 0 else 0.0
 
 
 class CostSummary(BaseModel):

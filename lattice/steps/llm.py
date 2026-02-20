@@ -68,11 +68,13 @@ class LLMStep:
         client: LLMClient | None = None,
         schema: Type[BaseModel] = EnrichmentResult,
         max_retries: int = 2,
+        cache: bool = True,
     ):
         self.name = name
         self.depends_on = depends_on or []
         self.model = model
         self.temperature = temperature
+        self.cache = cache
         self.max_tokens = max_tokens
         self._custom_system_prompt = system_prompt
         self.api_key = api_key

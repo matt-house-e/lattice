@@ -22,12 +22,12 @@ class PipelineResult:
     """Result from Pipeline.run() / Pipeline.run_async().
 
     Attributes:
-        data: Enriched DataFrame with results merged in.
+        data: Enriched DataFrame or list[dict] (matches input type).
         cost: Aggregated token usage across all steps and rows.
         errors: Per-row errors (empty if all rows succeeded).
     """
 
-    data: pd.DataFrame
+    data: pd.DataFrame | list[dict[str, Any]]
     cost: CostSummary = field(default_factory=CostSummary)
     errors: list[RowError] = field(default_factory=list)
 
@@ -78,13 +78,15 @@ class Pipeline:
 
     def run(
         self,
-        df: pd.DataFrame,
+        data: pd.DataFrame | list[dict[str, Any]],
         config: Any = None,
     ) -> PipelineResult:
         """Synchronous entry point — the ONE way to use Lattice.
 
+        Accepts a DataFrame or ``list[dict]``. Output type matches input type.
+
         Raises ``RuntimeError`` if called from inside a running event loop
-        (use ``await pipeline.run_async(df)`` in that case).
+        (use ``await pipeline.run_async(data)`` in that case).
         """
         try:
             asyncio.get_running_loop()
@@ -95,14 +97,14 @@ class Pipeline:
         except RuntimeError as exc:
             if "run_async" in str(exc):
                 raise
-        return asyncio.run(self.run_async(df, config))
+        return asyncio.run(self.run_async(data, config))
 
     async def run_async(
         self,
-        df: pd.DataFrame,
+        data: pd.DataFrame | list[dict[str, Any]],
         config: Any = None,
     ) -> PipelineResult:
-        """Async entry point."""
+        """Async entry point. Accepts DataFrame or list[dict]."""
         from ..core.config import EnrichmentConfig
 
         config = config or EnrichmentConfig()
@@ -110,20 +112,49 @@ class Pipeline:
         # Collect field specs from steps
         all_fields = self._collect_field_specs()
 
-        # Convert DataFrame to rows
-        rows = df.to_dict(orient="records")
+        # Convert input to rows
+        if isinstance(data, list):
+            rows = data
+            input_is_list = True
+        else:
+            rows = data.to_dict(orient="records")
+            input_is_list = False
 
-        # Execute
-        accumulated, errors, cost = await self.execute(
-            rows=rows,
-            all_fields=all_fields,
-            config=config,
-        )
+        # Set up cache manager
+        cache_manager = None
+        if getattr(config, "enable_caching", False):
+            from ..core.cache import CacheManager
 
-        # Build result DataFrame
-        df_out = self._build_result_df(df, accumulated, config)
+            cache_manager = CacheManager(
+                cache_dir=getattr(config, "cache_dir", ".lattice"),
+                ttl=getattr(config, "cache_ttl", 3600),
+            )
 
-        return PipelineResult(data=df_out, cost=cost, errors=errors)
+        try:
+            # Execute
+            accumulated, errors, cost = await self.execute(
+                rows=rows,
+                all_fields=all_fields,
+                config=config,
+                cache_manager=cache_manager,
+            )
+        finally:
+            if cache_manager is not None:
+                cache_manager.close()
+
+        # Build output matching input type
+        if input_is_list:
+            result_rows: list[dict[str, Any]] = []
+            for idx, row in enumerate(rows):
+                merged = dict(row)
+                for key, value in accumulated[idx].items():
+                    if not key.startswith("__"):
+                        merged[key] = value
+                result_rows.append(merged)
+            return PipelineResult(data=result_rows, cost=cost, errors=errors)
+        else:
+            df_out = self._build_result_df(data, accumulated, config)
+            return PipelineResult(data=df_out, cost=cost, errors=errors)
 
     def runner(self, config: Any = None) -> Any:
         """Power user: returns a reusable Enricher with config.
@@ -133,6 +164,16 @@ class Pipeline:
         from ..core.enricher import Enricher
 
         return Enricher(pipeline=self, config=config)
+
+    def clear_cache(self, step: str | None = None, cache_dir: str = ".lattice") -> int:
+        """Clear cached results. Returns count of entries deleted."""
+        from ..core.cache import CacheManager
+
+        mgr = CacheManager(cache_dir=cache_dir, ttl=0)
+        try:
+            return mgr.delete_step(step) if step else mgr.delete_all()
+        finally:
+            mgr.close()
 
     def _collect_field_specs(self) -> dict[str, dict[str, Any]]:
         """Collect field specs from all steps.
@@ -176,9 +217,8 @@ class Pipeline:
                 if key.startswith("__"):
                     continue
                 if not overwrite_fields and key in df_out.columns:
-                    import pandas as _pd
                     existing = df_out.at[df_out.index[idx], key]
-                    if _pd.notna(existing) and existing != "":
+                    if pd.notna(existing) and existing != "":
                         continue
                 df_out.at[df_out.index[idx], key] = value
         return df_out
@@ -253,6 +293,8 @@ class Pipeline:
         config: Any = None,
         prior_step_results: Optional[dict[str, list[dict[str, Any]]]] = None,
         on_step_complete: Optional[Callable[[str, list[dict[str, Any]]], None]] = None,
+        cache_manager: Any = None,
+        on_partial_checkpoint: Optional[Callable[[str, list[dict], int], None]] = None,
     ) -> tuple[list[dict[str, Any]], list[RowError], CostSummary]:
         """Execute the pipeline across all rows (column-oriented).
 
@@ -262,6 +304,9 @@ class Pipeline:
             config: Optional EnrichmentConfig.
             prior_step_results: Pre-populated results for checkpoint resume.
             on_step_complete: Sync callback fired after each step completes.
+            cache_manager: Optional CacheManager for input-hash caching.
+            on_partial_checkpoint: Callback(step_name, results, completed_count)
+                fired every checkpoint_interval rows.
 
         Returns:
             Tuple of (accumulated results, row errors, cost summary).
@@ -277,6 +322,10 @@ class Pipeline:
         show_progress = True
         if config is not None:
             show_progress = getattr(config, "enable_progress_bar", show_progress)
+
+        checkpoint_interval = 0
+        if config is not None:
+            checkpoint_interval = getattr(config, "checkpoint_interval", 0)
 
         semaphore = asyncio.Semaphore(max_workers)
         num_rows = len(rows)
@@ -319,6 +368,9 @@ class Pipeline:
                         semaphore,
                         num_rows,
                         on_error,
+                        cache_manager=cache_manager,
+                        checkpoint_interval=checkpoint_interval,
+                        on_partial_checkpoint=on_partial_checkpoint,
                     )
                     for step_name in steps_to_run
                 ]
@@ -365,11 +417,16 @@ class Pipeline:
         semaphore: asyncio.Semaphore,
         num_rows: int,
         on_error: str = "continue",
+        cache_manager: Any = None,
+        checkpoint_interval: int = 0,
+        on_partial_checkpoint: Optional[Callable] = None,
     ) -> tuple[list[RowError], StepUsage | None]:
         """Execute a single step across all rows concurrently.
 
         Returns tuple of (row errors, aggregated step usage).
         """
+        from ..core.cache import _compute_step_cache_key
+
         # Slice fields for this step (internal __ fields won't be in all_fields — that's fine)
         step_fields = {f: all_fields[f] for f in step.fields if f in all_fields}
 
@@ -377,13 +434,26 @@ class Pipeline:
         errors: list[RowError] = []
         usage_list: list[UsageInfo] = []
 
+        cache_hits = 0
+        cache_misses = 0
+        step_cache_enabled = cache_manager is not None and getattr(step, "cache", True)
+
         async def process_row(idx: int) -> StepResult | BaseException:
+            nonlocal cache_hits, cache_misses
             async with semaphore:
                 # Gather prior results from dependency steps
                 prior: dict[str, Any] = {}
                 for dep_name in step.depends_on:
                     if dep_name in step_values:
                         prior.update(step_values[dep_name][idx])
+
+                cache_key = None
+                if step_cache_enabled:
+                    cache_key = _compute_step_cache_key(step, rows[idx], prior, step_fields)
+                    cached = cache_manager.get(cache_key)
+                    if cached is not None:
+                        cache_hits += 1
+                        return StepResult(values=cached)
 
                 ctx = StepContext(
                     row=rows[idx],
@@ -392,45 +462,101 @@ class Pipeline:
                     config=config,
                 )
 
-                return await step.run(ctx)
+                result = await step.run(ctx)
 
-        row_coros = [process_row(idx) for idx in range(num_rows)]
-        raw_results = await asyncio.gather(*row_coros, return_exceptions=True)
+                if step_cache_enabled:
+                    cache_manager.set(cache_key, step.name, result.values)
 
-        for idx, result_or_exc in enumerate(raw_results):
-            if isinstance(result_or_exc, BaseException):
-                row_error = RowError(
-                    row_index=idx,
-                    step_name=step.name,
-                    error=result_or_exc,
-                )
-                errors.append(row_error)
-                # Sentinel values for failed rows
-                results[idx] = {f: None for f in step.fields}
-                logger.warning(
-                    "Row %d failed in step '%s': %s",
-                    idx, step.name, result_or_exc,
-                )
-                if on_error == "raise":
-                    # Store partial results before raising
-                    step_values[step.name] = results
-                    raise result_or_exc
-            else:
-                results[idx] = result_or_exc.values
-                if result_or_exc.usage:
-                    usage_list.append(result_or_exc.usage)
+                if step_cache_enabled:
+                    cache_misses += 1
+                return result
+
+        if checkpoint_interval > 0 and on_partial_checkpoint is not None:
+            # as_completed pattern: fire partial saves as rows complete
+            async def tracked_row(idx: int):
+                try:
+                    return (idx, await process_row(idx), None)
+                except BaseException as exc:
+                    return (idx, None, exc)
+
+            tasks = [asyncio.create_task(tracked_row(i)) for i in range(num_rows)]
+            completed_count = 0
+            for coro in asyncio.as_completed(tasks):
+                idx, result_or_none, exc = await coro
+
+                if exc is not None:
+                    row_error = RowError(
+                        row_index=idx,
+                        step_name=step.name,
+                        error=exc,
+                    )
+                    errors.append(row_error)
+                    results[idx] = {f: None for f in step.fields}
+                    logger.warning(
+                        "Row %d failed in step '%s': %s",
+                        idx, step.name, exc,
+                    )
+                    if on_error == "raise":
+                        step_values[step.name] = results
+                        # Cancel remaining tasks
+                        for t in tasks:
+                            t.cancel()
+                        raise exc
+                else:
+                    results[idx] = result_or_none.values
+                    if result_or_none.usage:
+                        usage_list.append(result_or_none.usage)
+
+                completed_count += 1
+                if completed_count % checkpoint_interval == 0:
+                    on_partial_checkpoint(step.name, results, completed_count)
+        else:
+            row_coros = [process_row(idx) for idx in range(num_rows)]
+            raw_results = await asyncio.gather(*row_coros, return_exceptions=True)
+
+            for idx, result_or_exc in enumerate(raw_results):
+                if isinstance(result_or_exc, BaseException):
+                    row_error = RowError(
+                        row_index=idx,
+                        step_name=step.name,
+                        error=result_or_exc,
+                    )
+                    errors.append(row_error)
+                    # Sentinel values for failed rows
+                    results[idx] = {f: None for f in step.fields}
+                    logger.warning(
+                        "Row %d failed in step '%s': %s",
+                        idx, step.name, result_or_exc,
+                    )
+                    if on_error == "raise":
+                        # Store partial results before raising
+                        step_values[step.name] = results
+                        raise result_or_exc
+                else:
+                    results[idx] = result_or_exc.values
+                    if result_or_exc.usage:
+                        usage_list.append(result_or_exc.usage)
 
         step_values[step.name] = results
 
         # Aggregate usage for this step
         step_usage: StepUsage | None = None
-        if usage_list:
+        if usage_list or cache_hits > 0 or cache_misses > 0:
+            # rows_processed: when caching is active, count via cache stats
+            # (FunctionSteps don't emit usage, so len(usage_list) would be 0)
+            if step_cache_enabled:
+                rows_processed = cache_hits + cache_misses
+            else:
+                rows_processed = len(usage_list)
+
             step_usage = StepUsage(
                 prompt_tokens=sum(u.prompt_tokens for u in usage_list),
                 completion_tokens=sum(u.completion_tokens for u in usage_list),
                 total_tokens=sum(u.total_tokens for u in usage_list),
-                rows_processed=len(usage_list),
-                model=usage_list[0].model,
+                rows_processed=rows_processed,
+                model=usage_list[0].model if usage_list else "",
+                cache_hits=cache_hits,
+                cache_misses=cache_misses,
             )
 
         return errors, step_usage

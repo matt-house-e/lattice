@@ -24,11 +24,15 @@ class FunctionStep:
         fn: Callable[..., Any],
         fields: list[str],
         depends_on: list[str] | None = None,
+        cache: bool = True,
+        cache_version: str | None = None,
     ):
         self.name = name
         self.fn = fn
         self.fields = fields
         self.depends_on = depends_on or []
+        self.cache = cache
+        self.cache_version = cache_version
         self._is_async = asyncio.iscoroutinefunction(fn)
 
     async def run(self, ctx: StepContext) -> StepResult:
