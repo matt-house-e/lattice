@@ -143,10 +143,13 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 1. `CLAUDE.md` — This file. Architecture, phases, design decisions.
 2. `docs/instructions/PIPELINE_DESIGN.md` — Detailed technical design.
 3. `.notes/TECHNICAL-VISION.md` — Long-term vision and strategy.
-4. GitHub issues — Close stale issues, update epics, create new issues.
-5. Memory (`MEMORY.md`) — Current state, what's next, conventions.
+4. `docs/decisions/` — ADRs for major architectural decisions. New decisions get a new ADR file.
+5. GitHub issues — Close stale issues, update epics, create new issues.
+6. Memory (`MEMORY.md`) — Current state, what's next, conventions.
 
 **Never let these diverge.** A design decision discussed in conversation but not recorded in docs will be forgotten or contradicted. Update docs in the same session as the decision.
+
+**New architectural decisions** get an ADR in `docs/decisions/NNN-short-title.md`. See `docs/decisions/README.md` for the template. CLAUDE.md holds the *current* state; ADRs hold the *history* and reasoning.
 
 ## Git Workflow
 
