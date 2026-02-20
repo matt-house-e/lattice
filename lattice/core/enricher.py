@@ -30,6 +30,14 @@ class Enricher:
         config: Optional[EnrichmentConfig] = None,
         hooks: Any = None,
     ) -> None:
+        """Create an Enricher (typically via ``Pipeline.runner(config)``).
+
+        Args:
+            pipeline: The Pipeline to execute.
+            config: Optional :class:`EnrichmentConfig` controlling concurrency,
+                retries, caching, checkpointing, and progress display.
+            hooks: Optional :class:`EnrichmentHooks` for lifecycle callbacks.
+        """
         self.pipeline = pipeline
         self.config = config or EnrichmentConfig()
         self._checkpoint = CheckpointManager(self.config)
@@ -70,7 +78,18 @@ class Enricher:
         overwrite_fields: Optional[bool] = None,
         data_identifier: Optional[str] = None,
     ) -> pd.DataFrame:
-        """Execute the pipeline across all rows of *df*."""
+        """Execute the pipeline across all rows of *df*.
+
+        Args:
+            df: Input DataFrame. Rows are converted to dicts internally.
+            overwrite_fields: Whether to overwrite non-empty existing columns.
+                Defaults to ``config.overwrite_fields``.
+            data_identifier: Stable identifier for checkpoint resume. If
+                ``None``, derived from the DataFrame's column names and length.
+
+        Returns:
+            A copy of *df* with enrichment columns added/updated.
+        """
         if overwrite_fields is None:
             overwrite_fields = self.config.overwrite_fields
 

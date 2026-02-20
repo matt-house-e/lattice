@@ -13,13 +13,17 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class StepContext:
-    """Immutable context passed to each step.
+    """Immutable context passed to each step's ``run()`` method.
 
     Attributes:
-        row: Original row data (converted from pd.Series at the Enricher boundary).
-        fields: Field specs for THIS step only (sliced by Pipeline).
-        prior_results: Merged outputs from dependency steps.
-        config: Optional EnrichmentConfig.
+        row: Original row data as ``dict[str, Any]``.
+        fields: Resolved field specs for THIS step only, always
+            ``dict[str, dict]`` (even when the step constructor received
+            ``list[str]`` — the pipeline resolves specs before slicing).
+        prior_results: Merged outputs from all dependency steps for the
+            current row.
+        config: Optional :class:`EnrichmentConfig` for reading runtime
+            settings (temperature, max_tokens, etc.).
     """
 
     row: dict[str, Any]
@@ -49,6 +53,13 @@ class Step(Protocol):
 
     Async-only to eliminate the sync/async duplication from v0.2.
     Implementations can be plain classes — no inheritance required.
+
+    Attributes:
+        name: Unique step identifier.
+        fields: Field names this step produces, always ``list[str]`` on
+            instances regardless of constructor input form (LLMStep
+            normalizes ``dict`` fields to a list of names).
+        depends_on: Names of steps whose outputs this step requires.
     """
 
     name: str

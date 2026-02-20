@@ -52,6 +52,7 @@ class PipelineResult:
 
     @property
     def has_errors(self) -> bool:
+        """True if any rows produced errors during pipeline execution."""
         return len(self.errors) > 0
 
 
@@ -65,6 +66,19 @@ class Pipeline:
     """
 
     def __init__(self, steps: list[Step]):
+        """Build a pipeline from an ordered list of steps.
+
+        Args:
+            steps: Steps (LLMStep, FunctionStep, or any Step-protocol object)
+                to execute.  Dependencies between steps are declared via each
+                step's ``depends_on`` list; independent steps at the same
+                topological level run in parallel.
+
+        Raises:
+            PipelineError: If step names are duplicated, a dependency references
+                a step that doesn't exist, or the dependency graph contains a
+                cycle.
+        """
         self._steps = list(steps)
         self._step_map: dict[str, Step] = {}
         self._execution_levels: list[list[str]] = []
@@ -83,6 +97,17 @@ class Pipeline:
         return [list(level) for level in self._execution_levels]
 
     def get_step(self, name: str) -> Step:
+        """Look up a step by name.
+
+        Args:
+            name: The step name as passed to LLMStep/FunctionStep constructor.
+
+        Returns:
+            The Step instance.
+
+        Raises:
+            KeyError: If no step with the given name exists in this pipeline.
+        """
         return self._step_map[name]
 
     # -- primary API -----------------------------------------------------
@@ -117,7 +142,21 @@ class Pipeline:
         config: EnrichmentConfig | None = None,
         hooks: EnrichmentHooks | None = None,
     ) -> PipelineResult:
-        """Async entry point. Accepts DataFrame or list[dict]."""
+        """Async entry point — ``await pipeline.run_async(data)``.
+
+        Args:
+            data: Input rows as a DataFrame or ``list[dict]``.  Output type
+                matches the input type.
+            config: Optional :class:`EnrichmentConfig` controlling concurrency,
+                retries, caching, and progress display.  Defaults are sensible
+                for most workloads.
+            hooks: Optional :class:`EnrichmentHooks` for lifecycle callbacks
+                (pipeline start/end, step start/end, row complete).
+
+        Returns:
+            A :class:`PipelineResult` containing the enriched data, aggregated
+            cost/usage info, and any per-row errors.
+        """
         config = config or EnrichmentConfig()
         hooks = hooks or EnrichmentHooks()
 
@@ -190,16 +229,33 @@ class Pipeline:
             return PipelineResult(data=df_out, cost=cost, errors=errors)
 
     def runner(self, config: EnrichmentConfig | None = None) -> Any:
-        """Power user: returns a reusable Enricher with config.
+        """Create a reusable :class:`Enricher` runner for this pipeline.
 
-        Use for repeated execution, checkpointing, or server contexts.
+        Use when you need repeated execution with checkpointing, or want to
+        manage the runner lifecycle yourself (e.g. in a server context).
+
+        Args:
+            config: Optional :class:`EnrichmentConfig`.  Passed to the
+                Enricher and used for every subsequent ``run()`` call.
+
+        Returns:
+            An :class:`Enricher` instance bound to this pipeline and config.
         """
         from ..core.enricher import Enricher
 
         return Enricher(pipeline=self, config=config)
 
     def clear_cache(self, step: str | None = None, cache_dir: str = ".lattice") -> int:
-        """Clear cached results. Returns count of entries deleted."""
+        """Delete cached step results from the SQLite cache.
+
+        Args:
+            step: If provided, only delete entries for this step name.
+                If ``None``, delete all cached entries.
+            cache_dir: Directory containing the cache database.
+
+        Returns:
+            Number of cache entries deleted.
+        """
         from ..core.cache import CacheManager
 
         mgr = CacheManager(cache_dir=cache_dir, ttl=0)
@@ -269,7 +325,9 @@ class Pipeline:
                 dupes.add(n)
             seen.add(n)
         if dupes:
-            raise PipelineError(f"Duplicate step names: {dupes}")
+            raise PipelineError(
+                f"Duplicate step names: {dupes}. Each step must have a unique name."
+            )
 
         self._step_map = {s.name: s for s in self._steps}
 
@@ -295,7 +353,11 @@ class Pipeline:
 
         current_level = [name for name, deg in in_degree.items() if deg == 0]
         if not current_level:
-            raise PipelineError("Cycle detected: no steps without dependencies")
+            step_names = list(in_degree.keys())
+            raise PipelineError(
+                f"Cycle detected: no steps without dependencies. "
+                f"All steps have unresolved dependencies: {step_names}"
+            )
 
         levels: list[list[str]] = []
         processed: set[str] = set()
@@ -468,7 +530,26 @@ class Pipeline:
     ) -> tuple[list[RowError], StepUsage | None, float]:
         """Execute a single step across all rows concurrently.
 
-        Returns tuple of (row errors, aggregated step usage, elapsed seconds).
+        Args:
+            step: The step instance to execute.
+            rows: All input rows (original data).
+            all_fields: Merged field specs from all pipeline steps.
+            config: Optional EnrichmentConfig.
+            step_values: Mutable mapping of step_name -> per-row results.
+                This method writes its results into ``step_values[step.name]``.
+            semaphore: Concurrency limiter (``max_workers``).
+            num_rows: Total number of rows.
+            on_error: ``"continue"`` (default) or ``"raise"``.
+            cache_manager: Optional CacheManager for input-hash caching.
+            checkpoint_interval: Save partial progress every N rows (0 = off).
+            on_partial_checkpoint: Callback fired at each checkpoint interval.
+            hooks: Optional EnrichmentHooks for row-level lifecycle events.
+
+        Returns:
+            Tuple of (row errors, aggregated StepUsage or None, elapsed seconds).
+
+        Side effects:
+            Populates ``step_values[step.name]`` with per-row result dicts.
         """
         from ..core.cache import _compute_step_cache_key
 

@@ -114,6 +114,13 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 - **CSV is a utility, not a dependency.** `load_fields()` loads prompts from CSV for teams where non-devs manage fields. It's not in the core path.
 - **Prompt engineering follows OpenAI cookbook.** Markdown headers for sections, XML tags for data boundaries. Dynamic prompt builder only includes keys actually used across fields. JSON in prompts is avoided (performs poorly per OpenAI's testing).
 
+## API Conventions
+
+- **Docstring standard**: Google style (Args/Returns/Raises) on all public methods and classes. Attribute sections on dataclasses and Pydantic models.
+- **Error message standard**: State what's wrong, include relevant context (model name, step name), and suggest how to fix it. Preserve existing substrings that tests match against when updating messages.
+- **`fields` parameter types**: `LLMStep` accepts `list[str] | dict[str, str | dict]`; `FunctionStep` accepts `list[str]` only. On all step *instances*, `fields` is always `list[str]` (LLMStep normalizes dicts to a list of names).
+- **Exception exports**: All user-catchable exceptions (`EnrichmentError`, `FieldValidationError`, `StepError`, `PipelineError`, `RowError`) are exported from `lattice.__init__`.
+
 ## Scale Limits & Sweet Spot
 
 **Lattice's sweet spot: 100 to 50,000 rows.** Primary use case: 1,000-10,000 rows. This is the "too many for manual/Instructor, too few to justify big data infrastructure" zone.

@@ -68,16 +68,19 @@ class OpenAIClient:
                     except (ValueError, TypeError):
                         pass
             raise LLMAPIError(
-                str(exc),
+                f"OpenAI rate limit for model '{model}': {exc}",
                 status_code=429,
                 retry_after=retry_after,
                 is_rate_limit=True,
             ) from exc
         except APITimeoutError as exc:
-            raise LLMAPIError(str(exc), status_code=408) from exc
+            raise LLMAPIError(
+                f"OpenAI timeout for model '{model}': {exc}",
+                status_code=408,
+            ) from exc
         except APIError as exc:
             raise LLMAPIError(
-                str(exc),
+                f"OpenAI API error for model '{model}': {exc}",
                 status_code=getattr(exc, "status_code", None),
             ) from exc
 
