@@ -268,12 +268,27 @@ Every field gets `{field}_sources` column with attribution.
 result.summary.cost.total_usd  # For billing
 ```
 
-### 3. Caching
+### 3. Caching (Phase 4 — COMPLETE)
+
+SQLite-backed input-hash cache. Per-step-per-row granularity. Zero new dependencies (`sqlite3` is stdlib).
+
 ```python
-enricher = TableEnricher(
-    cache=EnrichmentCache(backend="redis", ttl_days=30)
-)
+# Enable caching for iterative development
+pipeline = Pipeline([
+    LLMStep("analyze", fields={...}),                                # Cached by default
+    FunctionStep("search", fn=search, cache_version="v2"),           # Versioned caching
+    LLMStep("synthesize", fields={...}, cache=False, depends_on=["search"]),  # Bypass cache
+])
+result = pipeline.run(df, config=EnrichmentConfig(
+    enable_caching=True,
+    cache_ttl=86400,          # 24 hours
+    cache_dir=".lattice",     # cache.db location
+))
+# Cache stats in result
+result.cost.steps["analyze"].cache_hit_rate  # 0.95
 ```
+
+**Key design:** Cache key = `SHA256(step_name + row_data + prior_results + field_specs + model + temperature)`. Changing a field's prompt, enum, or type auto-invalidates — no manual cache busting needed. SQLite WAL mode for concurrent access. Checkpoint enhanced with `checkpoint_interval=100` for partial step progress on large datasets.
 
 ### 4. Streaming
 ```python
@@ -332,8 +347,8 @@ def test_enrichment_accuracy():
 2. **Resilience** - Per-row error handling, API retry/backoff (Phase 2) ✅
 3. **Observability** - Progress reporting, cost aggregation (Phase 2) ✅
 4. **Config/code cleanup** - Remove dead fields, dead code, FieldManager → utility (Phase 2) ✅
-5. **Field spec + dynamic prompt** - 7-key field spec validation, dynamic prompt builder (markdown+XML), `default` enforcement, model default → mini (Phase 3)
-6. **Caching** - Input-hash cache, filesystem JSON backend, TTL expiry, per-step cache control (Phase 4)
+5. **Field spec + dynamic prompt** - 7-key field spec validation, dynamic prompt builder (markdown+XML), `default` enforcement, model default → mini (Phase 3) ✅
+6. **Caching** - SQLite input-hash cache, per-step-per-row, TTL expiry, cache stats, checkpoint_interval, list[dict] input (Phase 4) ✅
 
 ### Ship: Minimum Viable Distribution (Phase 5A)
 7. **Working examples** - 3-4 runnable scripts with sample data (including web search pattern)
@@ -372,16 +387,36 @@ def test_enrichment_accuracy():
 
 ---
 
+## Scale Limits & Positioning
+
+**Sweet spot: 100 to 50,000 rows.** Primary use case: 1,000-10,000.
+
+Lattice is single-process, in-memory (pandas), async. The bottleneck is almost always API rate limits and cost, not Lattice. With Tier 5 rate limits, Lattice processes 50K rows across 3 steps in under an hour.
+
+**Users outgrow Lattice when:**
+- **>50K-100K rows regularly** — need distributed processing (Spark, Ray, Prefect workers)
+- **Real-time/streaming** — Lattice is batch-only
+- **Multi-machine** — need distributed workers, not single-process asyncio
+- **Complex orchestration** — conditional branching, loops, human-in-the-loop → Prefect/Dagster
+- **Data exceeds memory** — >10GB DataFrames → Dask/Polars/Spark
+
+This is intentional positioning: Lattice fills the gap between Instructor (single LLM call, 1-100 rows) and enterprise data infrastructure (Spark/Prefect/Airflow, 100K+ rows). Caching + checkpointing make the 1K-50K range viable for iterative development.
+
+**Scale extensions (post-launch):**
+- **Chunked execution** (`chunk_size=5000`): Process N rows at a time, cache carries across chunks. Extends ceiling to ~500K rows without going distributed.
+- **`list[dict]` input** (Phase 4): Skip pandas conversion. Serves server contexts and Polars users.
+- **pandas stays required**: 77% of data practitioners use pandas. Lattice's users are pandas users. No native Polars — `list[dict]` covers the gap.
+
 ## The Pitch Evolution
 
-**Today (v0.3):**
+**Today (v0.4):**
 > "Lattice is a composable pipeline engine for enriching DataFrames with LLMs"
 
 **After Phase 2:**
 > "...that handles the hard parts: retries, error recovery, cost tracking, and concurrency"
 
 **After Phase 4:**
-> "...with one `pip install` and 5 lines of code"
+> "...with caching that auto-invalidates when you change prompts, and `list[dict]` input for any context"
 
 **With Provenance (future):**
 > "...and tells you exactly where each insight came from"

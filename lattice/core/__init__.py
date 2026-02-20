@@ -1,5 +1,6 @@
 """Core functionality for the Lattice enrichment tool."""
 
+from .cache import CacheManager
 from .enricher import Enricher
 from .checkpoint import CheckpointManager, CheckpointData
 from .config import EnrichmentConfig
@@ -12,6 +13,7 @@ from .exceptions import (
 )
 
 __all__ = [
+    "CacheManager",
     "Enricher",
     "CheckpointManager",
     "CheckpointData",

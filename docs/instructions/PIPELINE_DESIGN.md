@@ -1,7 +1,7 @@
 # Pipeline Architecture Design
 
-> **Status**: Phases 1-3 COMPLETE. Phase 4 pending.
-> **Version**: v0.3
+> **Status**: Phases 1-4 COMPLETE. Phase 5A next.
+> **Version**: v0.4
 > **Date**: February 2026
 
 ## Overview
@@ -49,9 +49,10 @@ class Step(Protocol):
 
 class Pipeline:
     def __init__(self, steps: list[Step]): ...
-    def run(self, df, config=None) -> PipelineResult: ...
-    async def run_async(self, df, config=None) -> PipelineResult: ...
+    def run(self, data, config=None) -> PipelineResult: ...         # DataFrame or list[dict]
+    async def run_async(self, data, config=None) -> PipelineResult: ...
     def runner(self, config=None) -> Enricher: ...
+    def clear_cache(self, step=None, cache_dir=".lattice") -> int: ...
     async def execute(self, rows, all_fields, config, ...) -> tuple[list[dict], list[RowError], CostSummary]: ...
 ```
 
@@ -161,12 +162,16 @@ class FunctionStep:
         fn: Callable,          # (StepContext) -> dict[str, Any]
         fields: list[str],
         depends_on: list[str] = None,
+        cache: bool = True,             # Phase 4: per-step cache bypass
+        cache_version: str = None,      # Phase 4: version-based invalidation
     ): ...
 ```
 
 - Wraps any sync or async callable
 - Sync functions run via `run_in_executor`
 - The escape hatch for any data source: APIs, databases, custom logic
+- `cache_version` — user bumps version string when function logic changes; auto-invalidates cache
+- `cache=False` — disables caching for non-deterministic functions
 
 ### LLMClient Protocol (`lattice/steps/providers/base.py`) — Phase 2
 
@@ -505,18 +510,180 @@ The prompt engineering layer is the core of enrichment quality. This phase rebui
 - Regex validation on `format` — future enhancement
 - `system_prompt_header` — Phase 5B (#34)
 
-## Phase 4: Caching (Epic #17)
+## Phase 4: Caching + Checkpoint Enhancement (Epic #17) — COMPLETE
 
-Input-hash cache for iterative development. Without caching, changing one field in a 3-step pipeline re-runs every API call for every row. This is the single biggest DX improvement.
+Input-hash cache for iterative development and large dataset resilience. Without caching, changing one field in a 3-step pipeline re-runs every API call for every row. This is the single biggest DX improvement.
+
+### Design Decisions (Feb 2026)
+
+**Caching and checkpointing are separate concerns:**
+- **Checkpoint**: Step-level crash recovery — "pipeline died at step 3, resume from step 2's output." Coarse-grained (per-step), fast resume (one JSON file load). Enhanced in Phase 4 with `checkpoint_interval` for partial step progress on large datasets.
+- **Cache**: Input-hash deduplication — "I changed step 3's prompt, skip steps 1 and 2 for unchanged rows." Fine-grained (per-step-per-row), content-addressed. Also provides row-level crash recovery as a side effect.
+
+Both can be enabled independently. For development: enable caching. For production with large datasets: enable both.
+
+**SQLite backend (zero dependencies):**
+`sqlite3` is Python stdlib. Benchmarks show 35% faster reads than filesystem JSON (sqlite.org), handles thousands of entries trivially, atomic concurrent writes via WAL mode. Single `.lattice/cache.db` file. Industry precedent: requests-cache, DiskCache (used by DSPy), and Instructor all use SQLite for local caching.
+
+**FunctionStep caching via `cache_version`:**
+FunctionSteps are cacheable with an explicit `cache_version` string. Users bump the version when function logic changes. `cache=False` disables caching for non-deterministic functions.
 
 ### Scope
-1. **Input-hash key** — `hash(step_name + row_data + field_specs + model)` → deterministic cache key
-2. **Filesystem JSON backend** — Simple, zero deps, works everywhere
-3. **TTL-based expiry** — `cache_ttl` already in `EnrichmentConfig` (unused), wire it up
-4. **Per-step control** — `LLMStep(..., cache=False)` to bypass
-5. **Pipeline-level control** — `EnrichmentConfig(enable_caching=True)` (already exists, wire it up)
+1. **Input-hash cache key** — `SHA256(canonical_json(step_name + row_data + prior_results + field_specs + model + temperature + system_prompt_config))`. Canonical JSON (sorted keys) for determinism. Changing a field's prompt, enum, or type auto-invalidates (Instructor pattern).
+2. **SQLite backend** — Single `.lattice/cache.db` file. WAL mode + `synchronous=NORMAL`. Zero new dependencies (`sqlite3` is stdlib).
+3. **TTL-based expiry** — `cache_ttl` already in `EnrichmentConfig` (unused), wire it up. Lazy expiry on read + periodic cleanup.
+4. **Per-step control** — `LLMStep(..., cache=False)` to bypass. `FunctionStep(..., cache_version="v1")` for versioned caching.
+5. **Pipeline-level control** — `EnrichmentConfig(enable_caching=True)` (already exists, wire it up). `pipeline.clear_cache()` for manual invalidation.
+6. **Cache stats** — Extend `StepUsage` with `cache_hits`, `cache_misses`, `cache_hit_rate`. Flows into `PipelineResult.cost`.
+7. **Checkpoint enhancement** — `checkpoint_interval: int = 100` — save partial step progress every N completed rows within a step. For large datasets (1K+ rows), prevents losing an entire step's work on crash.
+8. **`list[dict]` input support** — `Pipeline.run()` accepts `pd.DataFrame | list[dict]`. Skip pandas conversion when given dicts. Return type matches input type.
 
-**Note:** `enable_caching` and `cache_ttl` are already on `EnrichmentConfig` from Phase 1 — they're just not wired to anything. This phase makes them real.
+### Cache Key Composition
+
+```python
+# LLMStep cache key
+cache_key = sha256(canonical_json({
+    "step":        step.name,
+    "row":         row_data,           # Full row dict from DataFrame
+    "prior":       prior_results,      # Outputs from dependency steps
+    "fields":      field_specs,        # FieldSpec dicts (prompt, type, enum, etc.)
+    "model":       model,              # e.g. "gpt-4.1-mini"
+    "temperature": temperature,
+    "system":      system_prompt_hash, # Custom system prompt if any
+}))
+
+# FunctionStep cache key (function body isn't hashable)
+cache_key = sha256(canonical_json({
+    "step":          step.name,
+    "row":           row_data,
+    "prior":         prior_results,
+    "cache_version": cache_version,     # User-provided version string
+}))
+```
+
+**In the key:** Everything that affects the output — step identity, input data, field specs (so changing a prompt auto-invalidates), model config.
+
+**Not in the key:** Execution config (`max_retries`, `on_error`, `max_workers`), credentials (`api_key`, `base_url`), cache meta-config (`cache_ttl`).
+
+### SQLite Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS cache (
+    key        TEXT PRIMARY KEY,
+    step_name  TEXT NOT NULL,
+    value      TEXT NOT NULL,      -- JSON serialized step output
+    created_at REAL NOT NULL,
+    expires_at REAL               -- NULL = no expiry
+);
+CREATE INDEX IF NOT EXISTS idx_step ON cache(step_name);
+CREATE INDEX IF NOT EXISTS idx_expires ON cache(expires_at);
+```
+
+Pragmas at connection time:
+```sql
+PRAGMA journal_mode=WAL;          -- concurrent reads + writes
+PRAGMA synchronous=NORMAL;        -- safe for cache (recoverable data)
+PRAGMA cache_size=-8000;          -- 8MB in-memory page cache
+```
+
+### API Surface
+
+```python
+# Config (existing fields wired up + new fields)
+EnrichmentConfig(
+    enable_caching=True,          # Existing, wire it up
+    cache_ttl=3600,               # Existing, wire it up
+    cache_dir=".lattice",         # NEW — directory for cache.db
+    checkpoint_interval=100,      # NEW — save partial progress every N rows
+)
+
+# Per-step control
+LLMStep("analyze", fields={...}, cache=False)           # Bypass cache
+FunctionStep("search", fn=search, cache_version="v2")   # Version-based invalidation
+
+# Pipeline-level operations
+pipeline.clear_cache()              # Delete all cache entries
+pipeline.clear_cache(step="search") # Delete entries for one step
+
+# Stats (in existing PipelineResult.cost → StepUsage)
+result.cost.steps["analyze"].cache_hits      # 95
+result.cost.steps["analyze"].cache_misses    # 5
+result.cost.steps["analyze"].cache_hit_rate  # 0.95
+```
+
+### Config Preset Updates
+
+```python
+EnrichmentConfig.for_development()
+    # Adds:
+    enable_caching=True          # Avoid re-running during iteration
+    cache_dir=".lattice"
+
+EnrichmentConfig.for_production()
+    # Adds:
+    enable_caching=True
+    enable_checkpointing=True    # Existing
+    checkpoint_interval=100      # Partial step progress for large datasets
+    cache_dir=".lattice"
+```
+
+### Integration Points
+
+**Where cache checks happen:** In `Pipeline._execute_step()`, wrapping `step.run(ctx)`:
+1. Compute cache key from StepContext inputs (row, prior_results, field_specs, model config)
+2. Check SQLite → hit returns cached result (no API call), increment `cache_hits`
+3. On miss: call `step.run(ctx)`, store result in SQLite, increment `cache_misses`
+
+**Where checkpoint interval fires:** In `Pipeline._execute_step()`, as rows complete:
+1. Track completed row count via atomic counter
+2. Every `checkpoint_interval` rows, fire partial checkpoint callback
+3. Enricher saves partial step state (completed row indices + their results) to checkpoint file
+
+**Cache + checkpoint interaction:**
+- When both enabled: checkpoint provides fast "which steps are fully done" metadata; cache provides row-level recovery within partially-completed steps
+- When only cache enabled: row-level recovery is automatic; no step-level metadata
+- When only checkpoint enabled: step-level + `checkpoint_interval` row-level recovery; no cross-run deduplication
+
+### `list[dict]` Input Support
+
+`Pipeline.run()` accepts `pd.DataFrame | list[dict]`. When given a list of dicts, skip the pandas conversion and use directly. Return type matches input type: DataFrame in → DataFrame out, list[dict] in → `PipelineResult` with `list[dict]` data.
+
+```python
+# DataFrame (existing)
+result = pipeline.run(df)
+result.data  # pd.DataFrame
+
+# list[dict] (new)
+result = pipeline.run([{"company": "Acme"}, {"company": "Beta"}])
+result.data  # list[dict]
+
+# Polars users (no native support needed — one-liner)
+result = pipeline.run(polars_df.to_dicts())
+```
+
+This makes pandas a convenience dependency rather than a hard requirement for the internal path. Server contexts (FastAPI) and test code benefit from skipping DataFrame construction.
+
+### Future (Not Phase 4)
+
+- **Chunked execution** (`chunk_size=5000`): Process N rows at a time through the full pipeline. Memory stays bounded, cache carries across chunks. Changes execution from column-oriented to chunk-oriented — separate issue, depends on Phase 4 caching.
+- **Intra-batch deduplication**: If 100 rows have identical inputs, call the LLM once and map result to all 100. Changes the execution loop (group by cache key before dispatch). Significant cost savings for datasets with duplicate entries.
+- **Custom cache backends**: `CacheBackend` protocol for Redis, Memcached, etc. Users implement `get()`/`set()`/`delete()`.
+- **`cache_key_fn`**: Custom cache key function on FunctionStep for fine-grained control (e.g. cache by company domain only, not full row).
+- **Optional Polars support**: Accept `pl.DataFrame` at boundary, convert via `.to_dicts()`. Not needed while `list[dict]` input covers the use case. Revisit post-launch if users request it.
+
+**Note:** `enable_caching` and `cache_ttl` are already on `EnrichmentConfig` from Phase 1 — they're just not wired to anything. This phase makes them real and adds `cache_dir` and `checkpoint_interval`.
+
+### What was built
+
+1. **CacheManager** (`lattice/core/cache.py`) — SQLite-backed cache with WAL mode, lazy connection, TTL expiry on read, cleanup method. Contains `compute_cache_key()` (SHA-256 of canonical JSON) and `_compute_step_cache_key()` (duck-types LLMStep vs FunctionStep).
+2. **Cache integration in `_execute_step()`** — Cache check before `step.run()`, cache store after. `step_cache_enabled` flag from `cache_manager is not None and getattr(step, 'cache', True)`.
+3. **Cache stats** — `StepUsage.cache_hits`, `cache_misses`, `cache_hit_rate` property. Flows into `PipelineResult.cost.steps["name"]`.
+4. **Per-step control** — `LLMStep(..., cache=True)` and `FunctionStep(..., cache=True, cache_version="v1")`. `cache=False` bypasses.
+5. **Config wiring** — `cache_dir=".lattice"`, `checkpoint_interval=0` added to `EnrichmentConfig`. Presets updated: `for_development()` enables caching, `for_production()` enables caching + `checkpoint_interval=100`.
+6. **`list[dict]` input** — `Pipeline.run()` / `run_async()` accept `pd.DataFrame | list[dict]`. Output type matches input type. Internal fields (`__` prefixed) filtered from list output.
+7. **`Pipeline.clear_cache()`** — Full and per-step invalidation.
+8. **Checkpoint interval** — `checkpoint_interval=N` saves partial step progress every N rows via `asyncio.as_completed` pattern. Enricher wires callback to `CheckpointManager.save_step()`.
+9. **CacheManager wiring** — Created and closed in `run_async()` and `Enricher.run_async()` with `finally` guard.
 
 ## Phase 5A: Ship (Epic #18)
 
@@ -561,3 +728,11 @@ Minimum viable distribution. Get Lattice into users' hands.
 | Markdown headers + XML data boundaries | Feb 2026 | OpenAI GPT-4.1 cookbook recommendation. JSON in prompts "performed particularly poorly" in their long-context testing. |
 | Web search = two-step FunctionStep → LLMStep | Feb 2026 | OpenAI web search + structured output in one call is broken (truncation). Two-step avoids this. Citations flow as visible `sources` column. |
 | Three-tier prompt customization | Feb 2026 | Default (dynamic), `system_prompt_header=` (domain injection), `system_prompt=` (full override). Covers 99% of use cases without complexity. |
+| SQLite cache backend (not filesystem JSON) | Feb 2026 | stdlib `sqlite3`, 35% faster reads than FS, WAL mode for concurrency, single file, TTL via SQL. Industry standard: requests-cache, DiskCache, DSPy all use SQLite. |
+| Cache + checkpoint are separate concerns | Feb 2026 | Checkpoint = step-level crash recovery (fast single-file resume). Cache = row-level input-hash deduplication (across runs, auto-invalidates on prompt change). Both can be enabled independently. |
+| FunctionStep caching via `cache_version` | Feb 2026 | Function body isn't hashable. User provides explicit version string, bumps it when logic changes. `cache=False` for non-deterministic functions. |
+| `checkpoint_interval` for large datasets | Feb 2026 | Save partial step progress every N rows (default 100). Prevents losing entire step of work on crash for datasets with thousands of rows. |
+| `list[dict]` input support | Feb 2026 | Internals already work on `list[dict]`. Accept dicts directly — serves server contexts, test code, and Polars users (`.to_dicts()`). |
+| No native Polars support (for now) | Feb 2026 | 77% of Python data practitioners use pandas. Zero LLM tools support Polars natively. `list[dict]` input covers Polars users. Revisit post-launch. |
+| Chunked execution is separate from Phase 4 | Feb 2026 | Changes execution model from column-oriented to chunk-oriented. Medium effort, depends on caching. Own issue in Phase 5B. |
+| Keep pandas as base dependency | Feb 2026 | Lattice's users are pandas users (enrichment workflows, Jupyter, CSV origins). Making pandas optional adds complexity for minimal benefit. |

@@ -13,7 +13,7 @@ import pandas as pd
 
 from .checkpoint import CheckpointManager
 from .config import EnrichmentConfig
-from .exceptions import EnrichmentError, FieldValidationError
+from .exceptions import FieldValidationError
 from ..pipeline import Pipeline
 from ..utils.logger import get_logger
 
@@ -155,14 +155,46 @@ class Enricher:
                 existing_results={k: v for k, v in cb_results.items() if k != step_name},
             )
 
+        # Set up cache manager
+        cache_manager = None
+        if getattr(self.config, "enable_caching", False):
+            from .cache import CacheManager
+
+            cache_manager = CacheManager(
+                cache_dir=getattr(self.config, "cache_dir", ".lattice"),
+                ttl=getattr(self.config, "cache_ttl", 3600),
+            )
+
+        # Set up partial checkpoint callback
+        checkpoint_interval = getattr(self.config, "checkpoint_interval", 0)
+        on_partial_checkpoint = None
+        if checkpoint_interval > 0 and self._checkpoint._enabled:
+            def on_partial_checkpoint(step_name, partial_results, completed_count):
+                self._checkpoint.save_step(
+                    data_identifier=data_identifier,
+                    category=category,
+                    step_name=step_name,
+                    step_row_results=partial_results,
+                    total_rows=len(rows),
+                    fields_dict=fields_dict,
+                    existing_completed=list(cb_completed),
+                    existing_results=dict(cb_results),
+                )
+
         # Execute pipeline
-        accumulated, errors, cost = await self.pipeline.execute(
-            rows=rows,
-            all_fields=fields_dict,
-            config=self.config,
-            prior_step_results=prior_step_results,
-            on_step_complete=on_step_complete,
-        )
+        try:
+            accumulated, errors, cost = await self.pipeline.execute(
+                rows=rows,
+                all_fields=fields_dict,
+                config=self.config,
+                prior_step_results=prior_step_results,
+                on_step_complete=on_step_complete,
+                cache_manager=cache_manager,
+                on_partial_checkpoint=on_partial_checkpoint,
+            )
+        finally:
+            if cache_manager is not None:
+                cache_manager.close()
 
         # Log error summary if any
         if errors:

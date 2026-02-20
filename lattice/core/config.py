@@ -5,8 +5,8 @@ Defaults are tuned for fast processing on OpenAI Tier 2+ accounts.
 For Tier 1 accounts, reduce max_workers to 5-10.
 """
 
-from dataclasses import dataclass, field
-from typing import Optional, Callable
+from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -69,12 +69,18 @@ class EnrichmentConfig:
     auto_resume: bool = True
     """Automatically resume from checkpoint on re-run."""
 
-    # === Caching (Phase 4) ===
+    # === Caching ===
     enable_caching: bool = False
     """Enable input-hash cache to skip redundant API calls."""
 
     cache_ttl: int = 3600
     """Cache time-to-live in seconds."""
+
+    cache_dir: str = ".lattice"
+    """Directory for cache.db."""
+
+    checkpoint_interval: int = 0
+    """Save partial step progress every N rows. 0 = disabled."""
 
     # === Validation ===
     def __post_init__(self):
@@ -86,25 +92,32 @@ class EnrichmentConfig:
             raise ValueError(f"max_workers must be positive, got {self.max_workers}")
         if self.max_retries < 0:
             raise ValueError(f"max_retries must be non-negative, got {self.max_retries}")
+        if self.cache_ttl < 0:
+            raise ValueError(f"cache_ttl must be non-negative, got {self.cache_ttl}")
+        if self.checkpoint_interval < 0:
+            raise ValueError(f"checkpoint_interval must be non-negative, got {self.checkpoint_interval}")
 
     # === Presets ===
     @classmethod
     def for_development(cls) -> 'EnrichmentConfig':
-        """Low concurrency, verbose logging. Safe for Tier 1 accounts."""
+        """Low concurrency, verbose logging, caching on. Safe for Tier 1 accounts."""
         return cls(
             max_workers=5,
             temperature=0.2,
             enable_progress_bar=True,
             log_level="DEBUG",
+            enable_caching=True,
         )
 
     @classmethod
     def for_production(cls) -> 'EnrichmentConfig':
-        """High concurrency with checkpointing. For Tier 2+ accounts."""
+        """High concurrency with caching and checkpointing. For Tier 2+ accounts."""
         return cls(
             max_workers=30,
             temperature=0.2,
             enable_checkpointing=True,
+            enable_caching=True,
+            checkpoint_interval=100,
             max_retries=5,
             log_level="INFO",
         )
