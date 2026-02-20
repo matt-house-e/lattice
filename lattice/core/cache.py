@@ -154,6 +154,7 @@ def _compute_step_cache_key(
     if getattr(step, "model", None) is not None:
         # LLMStep path
         system_prompt = getattr(step, "_custom_system_prompt", None) or ""
+        system_prompt_header = getattr(step, "_system_prompt_header", None) or ""
         return compute_cache_key(
             step_name=step.name,
             row=row,
@@ -163,6 +164,9 @@ def _compute_step_cache_key(
             temperature=getattr(step, "temperature", None),
             system_prompt_hash=hashlib.sha256(
                 system_prompt.encode("utf-8")
+            ).hexdigest(),
+            system_prompt_header_hash=hashlib.sha256(
+                system_prompt_header.encode("utf-8")
             ).hexdigest(),
         )
     else:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time as _time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -10,6 +11,15 @@ import pandas as pd
 from tqdm.auto import tqdm
 
 from ..core.exceptions import PipelineError, RowError
+from ..core.hooks import (
+    EnrichmentHooks,
+    PipelineStartEvent,
+    PipelineEndEvent,
+    StepStartEvent,
+    StepEndEvent,
+    RowCompleteEvent,
+    _fire_hook,
+)
 from ..schemas.base import CostSummary, StepUsage, UsageInfo
 from ..steps.base import Step, StepContext, StepResult
 from ..utils.logger import get_logger
@@ -80,6 +90,7 @@ class Pipeline:
         self,
         data: pd.DataFrame | list[dict[str, Any]],
         config: Any = None,
+        hooks: EnrichmentHooks | None = None,
     ) -> PipelineResult:
         """Synchronous entry point — the ONE way to use Lattice.
 
@@ -97,17 +108,19 @@ class Pipeline:
         except RuntimeError as exc:
             if "run_async" in str(exc):
                 raise
-        return asyncio.run(self.run_async(data, config))
+        return asyncio.run(self.run_async(data, config, hooks=hooks))
 
     async def run_async(
         self,
         data: pd.DataFrame | list[dict[str, Any]],
         config: Any = None,
+        hooks: EnrichmentHooks | None = None,
     ) -> PipelineResult:
         """Async entry point. Accepts DataFrame or list[dict]."""
         from ..core.config import EnrichmentConfig
 
         config = config or EnrichmentConfig()
+        hooks = hooks or EnrichmentHooks()
 
         # Collect field specs from steps
         all_fields = self._collect_field_specs()
@@ -130,6 +143,18 @@ class Pipeline:
                 ttl=getattr(config, "cache_ttl", 3600),
             )
 
+        # Fire on_pipeline_start
+        await _fire_hook(hooks.on_pipeline_start, PipelineStartEvent(
+            step_names=self.step_names,
+            num_rows=len(rows),
+            config=config,
+        ))
+
+        pipeline_start = _time.monotonic()
+        accumulated = None
+        errors: list[RowError] = []
+        cost = CostSummary()
+
         try:
             # Execute
             accumulated, errors, cost = await self.execute(
@@ -137,10 +162,19 @@ class Pipeline:
                 all_fields=all_fields,
                 config=config,
                 cache_manager=cache_manager,
+                hooks=hooks,
             )
         finally:
             if cache_manager is not None:
                 cache_manager.close()
+            # Fire on_pipeline_end even on error
+            elapsed = _time.monotonic() - pipeline_start
+            await _fire_hook(hooks.on_pipeline_end, PipelineEndEvent(
+                num_rows=len(rows),
+                total_errors=len(errors),
+                cost=cost,
+                elapsed_seconds=elapsed,
+            ))
 
         # Build output matching input type
         if input_is_list:
@@ -295,6 +329,7 @@ class Pipeline:
         on_step_complete: Optional[Callable[[str, list[dict[str, Any]]], None]] = None,
         cache_manager: Any = None,
         on_partial_checkpoint: Optional[Callable[[str, list[dict], int], None]] = None,
+        hooks: EnrichmentHooks | None = None,
     ) -> tuple[list[dict[str, Any]], list[RowError], CostSummary]:
         """Execute the pipeline across all rows (column-oriented).
 
@@ -307,10 +342,13 @@ class Pipeline:
             cache_manager: Optional CacheManager for input-hash caching.
             on_partial_checkpoint: Callback(step_name, results, completed_count)
                 fired every checkpoint_interval rows.
+            hooks: Optional EnrichmentHooks for lifecycle events.
 
         Returns:
             Tuple of (accumulated results, row errors, cost summary).
         """
+        hooks = hooks or EnrichmentHooks()
+
         max_workers = 3
         if config is not None:
             max_workers = getattr(config, "max_workers", max_workers)
@@ -346,7 +384,7 @@ class Pipeline:
             disable=not show_progress,
         )
 
-        for level in self._execution_levels:
+        for level_idx, level in enumerate(self._execution_levels):
             # Only execute steps not already in step_values (i.e. not resumed)
             steps_to_run = [name for name in level if name not in step_values]
             skipped = [name for name in level if name in step_values]
@@ -357,6 +395,14 @@ class Pipeline:
 
             if steps_to_run:
                 step_bar.set_postfix(step=", ".join(steps_to_run))
+
+                # Fire on_step_start for each step in this level
+                for step_name in steps_to_run:
+                    await _fire_hook(hooks.on_step_start, StepStartEvent(
+                        step_name=step_name,
+                        num_rows=num_rows,
+                        level=level_idx,
+                    ))
 
                 level_coros = [
                     self._execute_step(
@@ -371,15 +417,25 @@ class Pipeline:
                         cache_manager=cache_manager,
                         checkpoint_interval=checkpoint_interval,
                         on_partial_checkpoint=on_partial_checkpoint,
+                        hooks=hooks,
                     )
                     for step_name in steps_to_run
                 ]
                 step_results_list = await asyncio.gather(*level_coros)
 
-                for step_name, (step_errors, usage) in zip(steps_to_run, step_results_list):
+                for step_name, (step_errors, usage, elapsed_s) in zip(steps_to_run, step_results_list):
                     all_errors.extend(step_errors)
                     if usage:
                         step_usage_map[step_name] = usage
+
+                    # Fire on_step_end
+                    await _fire_hook(hooks.on_step_end, StepEndEvent(
+                        step_name=step_name,
+                        num_rows=num_rows,
+                        num_errors=len(step_errors),
+                        usage=usage,
+                        elapsed_seconds=elapsed_s,
+                    ))
 
                 step_bar.update(len(steps_to_run))
 
@@ -420,12 +476,16 @@ class Pipeline:
         cache_manager: Any = None,
         checkpoint_interval: int = 0,
         on_partial_checkpoint: Optional[Callable] = None,
-    ) -> tuple[list[RowError], StepUsage | None]:
+        hooks: EnrichmentHooks | None = None,
+    ) -> tuple[list[RowError], StepUsage | None, float]:
         """Execute a single step across all rows concurrently.
 
-        Returns tuple of (row errors, aggregated step usage).
+        Returns tuple of (row errors, aggregated step usage, elapsed seconds).
         """
         from ..core.cache import _compute_step_cache_key
+
+        hooks = hooks or EnrichmentHooks()
+        step_start = _time.monotonic()
 
         # Slice fields for this step (internal __ fields won't be in all_fields — that's fine)
         step_fields = {f: all_fields[f] for f in step.fields if f in all_fields}
@@ -437,6 +497,9 @@ class Pipeline:
         cache_hits = 0
         cache_misses = 0
         step_cache_enabled = cache_manager is not None and getattr(step, "cache", True)
+
+        # Track per-row from_cache status
+        row_from_cache: list[bool] = [False] * num_rows
 
         async def process_row(idx: int) -> StepResult | BaseException:
             nonlocal cache_hits, cache_misses
@@ -453,6 +516,7 @@ class Pipeline:
                     cached = cache_manager.get(cache_key)
                     if cached is not None:
                         cache_hits += 1
+                        row_from_cache[idx] = True
                         return StepResult(values=cached)
 
                 ctx = StepContext(
@@ -496,6 +560,16 @@ class Pipeline:
                         "Row %d failed in step '%s': %s",
                         idx, step.name, exc,
                     )
+
+                    # Fire on_row_complete for error
+                    await _fire_hook(hooks.on_row_complete, RowCompleteEvent(
+                        step_name=step.name,
+                        row_index=idx,
+                        values={f: None for f in step.fields},
+                        error=exc,
+                        from_cache=False,
+                    ))
+
                     if on_error == "raise":
                         step_values[step.name] = results
                         # Cancel remaining tasks
@@ -506,6 +580,15 @@ class Pipeline:
                     results[idx] = result_or_none.values
                     if result_or_none.usage:
                         usage_list.append(result_or_none.usage)
+
+                    # Fire on_row_complete for success
+                    await _fire_hook(hooks.on_row_complete, RowCompleteEvent(
+                        step_name=step.name,
+                        row_index=idx,
+                        values=result_or_none.values,
+                        error=None,
+                        from_cache=row_from_cache[idx],
+                    ))
 
                 completed_count += 1
                 if completed_count % checkpoint_interval == 0:
@@ -528,6 +611,16 @@ class Pipeline:
                         "Row %d failed in step '%s': %s",
                         idx, step.name, result_or_exc,
                     )
+
+                    # Fire on_row_complete for error
+                    await _fire_hook(hooks.on_row_complete, RowCompleteEvent(
+                        step_name=step.name,
+                        row_index=idx,
+                        values={f: None for f in step.fields},
+                        error=result_or_exc,
+                        from_cache=False,
+                    ))
+
                     if on_error == "raise":
                         # Store partial results before raising
                         step_values[step.name] = results
@@ -536,6 +629,15 @@ class Pipeline:
                     results[idx] = result_or_exc.values
                     if result_or_exc.usage:
                         usage_list.append(result_or_exc.usage)
+
+                    # Fire on_row_complete for success
+                    await _fire_hook(hooks.on_row_complete, RowCompleteEvent(
+                        step_name=step.name,
+                        row_index=idx,
+                        values=result_or_exc.values,
+                        error=None,
+                        from_cache=row_from_cache[idx],
+                    ))
 
         step_values[step.name] = results
 
@@ -559,4 +661,5 @@ class Pipeline:
                 cache_misses=cache_misses,
             )
 
-        return errors, step_usage
+        elapsed = _time.monotonic() - step_start
+        return errors, step_usage, elapsed

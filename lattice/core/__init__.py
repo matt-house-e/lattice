@@ -11,6 +11,14 @@ from .exceptions import (
     PipelineError,
     RowError,
 )
+from .hooks import (
+    EnrichmentHooks,
+    PipelineStartEvent,
+    PipelineEndEvent,
+    StepStartEvent,
+    StepEndEvent,
+    RowCompleteEvent,
+)
 
 __all__ = [
     "CacheManager",
@@ -23,4 +31,10 @@ __all__ = [
     "StepError",
     "PipelineError",
     "RowError",
+    "EnrichmentHooks",
+    "PipelineStartEvent",
+    "PipelineEndEvent",
+    "StepStartEvent",
+    "StepEndEvent",
+    "RowCompleteEvent",
 ]

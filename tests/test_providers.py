@@ -164,3 +164,235 @@ class TestOpenAIClient:
             )
 
         assert exc_info.value.status_code == 408
+
+
+# -- AnthropicClient --------------------------------------------------------
+
+
+class TestAnthropicClient:
+    """Test Anthropic adapter — structured outputs via output_config.format.
+
+    The ``anthropic`` package is an optional extra, so we inject a fake module
+    into ``sys.modules`` to satisfy the deferred ``from anthropic import ...``
+    inside ``complete()``.
+    """
+
+    @staticmethod
+    def _install_mock_anthropic():
+        """Install a minimal mock ``anthropic`` package into sys.modules."""
+        import sys
+
+        mock_mod = MagicMock()
+        # Provide the exception classes the adapter imports
+        mock_mod.APIError = type("APIError", (Exception,), {})
+        mock_mod.APITimeoutError = type("APITimeoutError", (Exception,), {})
+        mock_mod.RateLimitError = type("RateLimitError", (Exception,), {})
+        mock_mod.AsyncAnthropic = MagicMock()
+        sys.modules.setdefault("anthropic", mock_mod)
+        return mock_mod
+
+    @pytest.mark.asyncio
+    async def test_json_schema_translated_to_output_config(self):
+        """json_schema response_format → Anthropic output_config.format."""
+        self._install_mock_anthropic()
+        from lattice.steps.providers.anthropic import AnthropicClient
+
+        schema = {
+            "type": "object",
+            "properties": {"f1": {"type": "string"}},
+            "required": ["f1"],
+            "additionalProperties": False,
+        }
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "enrichment_result",
+                "schema": schema,
+                "strict": True,
+            },
+        }
+
+        mock_response = SimpleNamespace(
+            content=[SimpleNamespace(text='{"f1": "val"}')],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        )
+        mock_inner = MagicMock()
+        mock_inner.messages.create = AsyncMock(return_value=mock_response)
+
+        client = AnthropicClient(api_key="test")
+        client._client = mock_inner
+
+        result = await client.complete(
+            messages=[{"role": "user", "content": "hi"}],
+            model="claude-sonnet-4-5-20250929",
+            temperature=0.2,
+            max_tokens=1000,
+            response_format=response_format,
+        )
+
+        call_kwargs = mock_inner.messages.create.call_args.kwargs
+        assert "output_config" in call_kwargs
+        assert call_kwargs["output_config"]["format"]["type"] == "json_schema"
+        assert call_kwargs["output_config"]["format"]["schema"] == schema
+        assert result.content == '{"f1": "val"}'
+
+    @pytest.mark.asyncio
+    async def test_json_object_ignored(self):
+        """json_object has no Anthropic equivalent — no output_config set."""
+        self._install_mock_anthropic()
+        from lattice.steps.providers.anthropic import AnthropicClient
+
+        mock_response = SimpleNamespace(
+            content=[SimpleNamespace(text='{"f1": "val"}')],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        )
+        mock_inner = MagicMock()
+        mock_inner.messages.create = AsyncMock(return_value=mock_response)
+
+        client = AnthropicClient(api_key="test")
+        client._client = mock_inner
+
+        await client.complete(
+            messages=[{"role": "user", "content": "hi"}],
+            model="claude-sonnet-4-5-20250929",
+            temperature=0.2,
+            max_tokens=1000,
+            response_format={"type": "json_object"},
+        )
+
+        call_kwargs = mock_inner.messages.create.call_args.kwargs
+        assert "output_config" not in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_none_response_format_no_output_config(self):
+        """No response_format → no output_config."""
+        self._install_mock_anthropic()
+        from lattice.steps.providers.anthropic import AnthropicClient
+
+        mock_response = SimpleNamespace(
+            content=[SimpleNamespace(text="hello")],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        )
+        mock_inner = MagicMock()
+        mock_inner.messages.create = AsyncMock(return_value=mock_response)
+
+        client = AnthropicClient(api_key="test")
+        client._client = mock_inner
+
+        await client.complete(
+            messages=[{"role": "user", "content": "hi"}],
+            model="claude-sonnet-4-5-20250929",
+            temperature=0.2,
+            max_tokens=1000,
+        )
+
+        call_kwargs = mock_inner.messages.create.call_args.kwargs
+        assert "output_config" not in call_kwargs
+
+
+# -- GoogleClient -----------------------------------------------------------
+
+
+class TestGoogleClient:
+    """Test Google Gemini adapter — structured outputs via response_json_schema.
+
+    The ``google-genai`` package is an optional extra, so we inject a fake module
+    into ``sys.modules`` to satisfy the deferred ``from google.genai import types``
+    inside ``complete()``.
+    """
+
+    @staticmethod
+    def _install_mock_google():
+        """Install minimal mock ``google.genai`` package into sys.modules."""
+        import sys
+
+        mock_types = MagicMock()
+        mock_types.GenerateContentConfig = lambda **kw: kw
+
+        mock_genai = MagicMock()
+        mock_genai.types = mock_types
+        mock_genai.Client = MagicMock()
+
+        # google is a namespace package — install all levels
+        sys.modules.setdefault("google", MagicMock())
+        sys.modules.setdefault("google.genai", mock_genai)
+        sys.modules.setdefault("google.genai.types", mock_types)
+        return mock_types
+
+    @pytest.mark.asyncio
+    async def test_json_schema_translated_to_response_json_schema(self):
+        """json_schema → response_mime_type + response_json_schema."""
+        self._install_mock_google()
+        from lattice.steps.providers.google import GoogleClient
+
+        schema = {
+            "type": "object",
+            "properties": {"f1": {"type": "string"}},
+            "required": ["f1"],
+            "additionalProperties": False,
+        }
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "enrichment_result",
+                "schema": schema,
+                "strict": True,
+            },
+        }
+
+        mock_response = SimpleNamespace(
+            text='{"f1": "val"}',
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=10, candidates_token_count=5,
+            ),
+        )
+        mock_client = MagicMock()
+        mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+        client = GoogleClient(api_key="test")
+        client._client = mock_client
+
+        result = await client.complete(
+            messages=[{"role": "user", "content": "hi"}],
+            model="gemini-2.5-flash",
+            temperature=0.2,
+            max_tokens=1000,
+            response_format=response_format,
+        )
+
+        call_args = mock_client.aio.models.generate_content.call_args
+        config = call_args.kwargs["config"]
+        assert config["response_mime_type"] == "application/json"
+        assert config["response_json_schema"] == schema
+        assert result.content == '{"f1": "val"}'
+
+    @pytest.mark.asyncio
+    async def test_json_object_sets_mime_type_only(self):
+        """json_object → response_mime_type only, no schema."""
+        self._install_mock_google()
+        from lattice.steps.providers.google import GoogleClient
+
+        mock_response = SimpleNamespace(
+            text='{"f1": "val"}',
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=10, candidates_token_count=5,
+            ),
+        )
+        mock_client = MagicMock()
+        mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+        client = GoogleClient(api_key="test")
+        client._client = mock_client
+
+        await client.complete(
+            messages=[{"role": "user", "content": "hi"}],
+            model="gemini-2.5-flash",
+            temperature=0.2,
+            max_tokens=1000,
+            response_format={"type": "json_object"},
+        )
+
+        call_args = mock_client.aio.models.generate_content.call_args
+        config = call_args.kwargs["config"]
+        assert config["response_mime_type"] == "application/json"
+        assert "response_json_schema" not in config

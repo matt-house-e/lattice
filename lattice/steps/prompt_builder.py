@@ -25,6 +25,7 @@ def build_system_message(
     row: dict[str, Any],
     prior_results: dict[str, Any] | None = None,
     custom_system_prompt: str | None = None,
+    system_prompt_header: str | None = None,
 ) -> str:
     """Build the full system message for an LLM enrichment call.
 
@@ -34,7 +35,10 @@ def build_system_message(
         prior_results: Merged outputs from dependency steps (or None).
         custom_system_prompt: If provided, replaces the auto-generated
             instruction portion (Role + Keys + Output Rules). Data sections
-            are still appended.
+            are still appended. When set, ``system_prompt_header`` is ignored.
+        system_prompt_header: Domain context injected as a ``# Context``
+            section between Role and Field Specification Keys. Ignored when
+            ``custom_system_prompt`` is set.
 
     Returns:
         Complete system message string.
@@ -44,7 +48,7 @@ def build_system_message(
     if custom_system_prompt is not None:
         instructions = custom_system_prompt
     else:
-        instructions = _build_instructions(field_specs, field_names)
+        instructions = _build_instructions(field_specs, field_names, system_prompt_header)
 
     data = _build_data_section(field_specs, row, prior_results)
     reminder = _build_reminder(field_names)
@@ -59,8 +63,9 @@ def build_system_message(
 def _build_instructions(
     field_specs: dict[str, FieldSpec],
     field_names: list[str],
+    system_prompt_header: str | None = None,
 ) -> str:
-    """Build the Role + Field Specification Keys + Output Rules sections."""
+    """Build the Role + Context + Field Specification Keys + Output Rules sections."""
     parts: list[str] = []
 
     # -- Role
@@ -71,6 +76,10 @@ def _build_instructions(
         "processing steps, produce a JSON object with exactly the requested "
         "fields as keys."
     )
+
+    # -- Context (system_prompt_header)
+    if system_prompt_header:
+        parts.append(f"# Context\n{system_prompt_header}")
 
     # -- Field Specification Keys (dynamic: only describe keys actually used)
     keys_section = _build_keys_section(field_specs)

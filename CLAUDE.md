@@ -4,7 +4,7 @@
 
 A programmatic enrichment engine. The gap between Instructor (single LLM call) and Clay (full SaaS platform). Users define a pipeline of composable steps, point it at a DataFrame, and get structured results. Lattice handles orchestration: column-oriented batching, step dependencies, Pydantic validation, retries, checkpointing, and async concurrency.
 
-## Architecture (v0.4)
+## Architecture (v0.5)
 
 **Column-oriented, composable steps:**
 ```
@@ -24,19 +24,23 @@ NOT row-oriented (that was v0.2). Each step runs across ALL rows before the next
 - **FunctionStep is the escape hatch**: Any external data source (APIs, web search, databases) is a FunctionStep. No built-in provider steps (no WebSearchStep).
 - **Step data**: `dict[str, Any]` not `pd.Series`. Steps are pure, no pandas.
 - **Internal fields**: `__` prefix (e.g. `__web_context`) for inter-step data, filtered from output.
+- **Lifecycle hooks**: `EnrichmentHooks` with 5 typed callbacks (pipeline start/end, step start/end, row complete). Passed to `run()`/`run_async()`. Sync + async hooks supported. Hook errors caught + logged, never crash pipelines.
 - **No eval tooling**: Lattice exposes data (cost, errors, usage). Users run their own evals. Lifecycle hooks let observability tools plug in without being dependencies.
 - **Minimal dependencies**: Base install: `openai`, `pydantic`, `pandas`, `tqdm`, `python-dotenv`. Optional: `anthropic`, `google-genai`. Never add heavy transitive deps (no litellm, no langfuse).
 - **Caching via SQLite (`sqlite3` stdlib)**: Input-hash per-step-per-row cache. Cache key includes step name, row data, prior results, field specs, model, and temperature — changing a prompt auto-invalidates. WAL mode for concurrent access. `cache=False` per-step bypass. `FunctionStep(..., cache_version="v1")` for function caching. Cache stats flow into `PipelineResult.cost`.
 - **Checkpoint + cache are separate concerns**: Checkpoint = step-level crash recovery (fast single-file resume). Cache = row-level input-hash deduplication (across runs). `checkpoint_interval=100` saves partial step progress every N rows for large datasets.
 - **`list[dict]` input accepted**: `Pipeline.run()` takes `pd.DataFrame | list[dict]`. Internals already work on dicts. Serves server contexts, test code, and Polars users (`.to_dicts()`).
+- **Structured outputs (OpenAI)**: Auto-enabled for native OpenAI with dict fields. `json_schema` + `strict: true` constrains token generation. Dynamic Pydantic model from field specs. Off for `base_url`, non-OpenAI, custom schema, list fields. Overridable: `structured_outputs=True/False`.
+- **`system_prompt_header`**: Tier 2 prompt customization. Injects `# Context` section between Role and Field Specification Keys. Ignored when `system_prompt` (Tier 3) is set.
+- **`web_search()` utility**: Factory wrapping OpenAI Responses API. Returns async callable for FunctionStep. Template queries with `{field}` placeholders. Graceful degradation on API errors.
 - **pandas stays as base dependency**: 77% of data practitioners use pandas. Lattice's users (enrichment workflows, Jupyter, CSV origins) are pandas users. No native Polars support — `list[dict]` covers the gap. Revisit post-launch.
 
 ### Public API
 
 ```python
-from lattice import Pipeline, LLMStep, FunctionStep, EnrichmentConfig
+from lattice import Pipeline, LLMStep, FunctionStep, EnrichmentConfig, EnrichmentHooks, web_search
 
-# Primary: OpenAI (default, zero config)
+# Primary: OpenAI (default, zero config, structured outputs auto-enabled)
 pipeline = Pipeline([
     LLMStep("analyze", fields={
         "market_size": "Estimate TAM in billions USD",               # shorthand (prompt only)
@@ -45,9 +49,17 @@ pipeline = Pipeline([
             "enum": ["Low", "Medium", "High"],
             "examples": ["High - Competes with AWS, Google Cloud"],
         },
-    })
+    }, system_prompt_header="You are analyzing B2B SaaS companies.")
 ])
-result = pipeline.run(df)
+result = pipeline.run(df, hooks=EnrichmentHooks(
+    on_row_complete=lambda e: print(f"Row {e.row_index}: {e.values}"),
+))
+
+# Web search + analysis (3 lines, not 30)
+Pipeline([
+    FunctionStep("research", fn=web_search("Research {company}: market"), fields=["__web_context", "sources"]),
+    LLMStep("analyze", fields={"market_size": "Estimate TAM"}, depends_on=["research"]),
+])
 
 # Anthropic: pip install lattice[anthropic]
 from lattice.providers import AnthropicClient
@@ -68,9 +80,9 @@ lattice/
 │   └── providers/  # LLMClient protocol + adapters (OpenAI, Anthropic, Google)
 ├── pipeline/       # DAG resolution + column-oriented execution + run() entry point
 ├── schemas/        # Pydantic models (EnrichmentResult)
-├── core/           # Enricher (internal runner), config, checkpoint, exceptions
+├── core/           # Enricher (internal runner), config, checkpoint, exceptions, hooks
 ├── data/           # load_fields() utility for CSV field definitions
-└── utils/          # Logging
+└── utils/          # Logging, web_search utility
 ```
 
 ## Build Phases
@@ -83,12 +95,13 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 | 2 | Resilience + API redesign: error handling, retries, progress, cost, Pipeline.run(df), fields on steps | COMPLETE |
 | 3 | Field spec + dynamic prompt (#33): 7-key field spec validation, dynamic prompt builder (markdown+XML), `default` enforcement, model default → gpt-4.1-mini, CSV loader update | COMPLETE |
 | 4 | Caching + checkpoint enhancement (#17): SQLite input-hash cache, per-step-per-row, TTL expiry, cache stats, `checkpoint_interval`, `list[dict]` input | COMPLETE |
-| 5A | Ship (#18): Working examples, README rewrite, PyPI publish (`lattice-enrichment`) | NOT STARTED |
-| 5B | Power user features: Lifecycle hooks (#30), three-tier prompt customization (#34), web search utility (#35), CLI | NOT STARTED |
+| 5 | Quality + Observability + DX: `system_prompt_header` (#34), lifecycle hooks (#30), structured outputs, `web_search()` utility (#35) | COMPLETE |
+| 6A | Ship (#18): Working examples, README rewrite, PyPI publish (`lattice-enrichment`) | NOT STARTED |
+| 6B | Power user features: Conditional steps, waterfall pattern, chunked execution, CLI | NOT STARTED |
 
 ### Backlog Triage (Feb 2026)
 - **#13 (Eval suite)** — Closed as won't-fix. Conflicts with design principle: evals are user-level, not library-level.
-- **#11 (Streaming)** — Kept, needs re-scope for v0.3 column-oriented model. May merge into #30 (hooks).
+- **#11 (Streaming)** — Closed. Subsumed by lifecycle hooks (`on_row_complete`).
 - **#12 (Provenance)** — Kept, deprioritized. Partially addressed by web search two-step pattern. Post-launch differentiator.
 
 ## Design Principles

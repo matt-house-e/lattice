@@ -211,3 +211,52 @@ class TestBuildSystemMessage:
         assert "**examples**" not in instructions
         assert "**bad_examples**" not in instructions
         assert "**default**" not in instructions
+
+
+# -- system_prompt_header ------------------------------------------------
+
+
+class TestSystemPromptHeader:
+    def test_header_injected_between_role_and_keys(self):
+        specs = {"f1": FieldSpec(prompt="test")}
+        msg = build_system_message(
+            specs, {"x": 1}, system_prompt_header="Analyzing B2B SaaS companies."
+        )
+
+        assert "# Context" in msg
+        assert "Analyzing B2B SaaS companies." in msg
+
+        # Verify ordering: Role < Context < Keys
+        role_pos = msg.index("# Role")
+        context_pos = msg.index("# Context")
+        keys_pos = msg.index("# Field Specification Keys")
+        assert role_pos < context_pos < keys_pos
+
+    def test_header_omitted_when_none(self):
+        specs = {"f1": FieldSpec(prompt="test")}
+        msg = build_system_message(specs, {"x": 1}, system_prompt_header=None)
+        assert "# Context" not in msg
+
+    def test_header_omitted_when_empty(self):
+        specs = {"f1": FieldSpec(prompt="test")}
+        msg = build_system_message(specs, {"x": 1}, system_prompt_header="")
+        assert "# Context" not in msg
+
+    def test_header_ignored_when_custom_system_prompt_set(self):
+        specs = {"f1": FieldSpec(prompt="test")}
+        msg = build_system_message(
+            specs, {"x": 1},
+            custom_system_prompt="Custom prompt.",
+            system_prompt_header="Should be ignored.",
+        )
+
+        assert "# Context" not in msg
+        assert "Should be ignored." not in msg
+        assert msg.startswith("Custom prompt.")
+
+    def test_header_multiline(self):
+        specs = {"f1": FieldSpec(prompt="test")}
+        header = "Line one.\nLine two.\nLine three."
+        msg = build_system_message(specs, {"x": 1}, system_prompt_header=header)
+
+        assert "# Context\nLine one.\nLine two.\nLine three." in msg

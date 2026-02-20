@@ -17,6 +17,19 @@ from ..utils.logger import get_logger
 from .base import StepContext, StepResult
 from .prompt_builder import build_system_message
 from .providers.base import LLMAPIError, LLMClient, LLMResponse
+from .providers.openai import OpenAIClient
+from .schema_builder import build_json_schema, build_response_model
+
+# Optional provider imports for structured output auto-detection
+try:
+    from .providers.anthropic import AnthropicClient as _AnthropicClient
+except ImportError:
+    _AnthropicClient = None
+
+try:
+    from .providers.google import GoogleClient as _GoogleClient
+except ImportError:
+    _GoogleClient = None
 
 logger = get_logger(__name__)
 
@@ -63,12 +76,14 @@ class LLMStep:
         temperature: float | None = None,
         max_tokens: int | None = None,
         system_prompt: str | None = None,
+        system_prompt_header: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
         client: LLMClient | None = None,
         schema: Type[BaseModel] = EnrichmentResult,
         max_retries: int = 2,
         cache: bool = True,
+        structured_outputs: bool | None = None,
     ):
         self.name = name
         self.depends_on = depends_on or []
@@ -77,11 +92,13 @@ class LLMStep:
         self.cache = cache
         self.max_tokens = max_tokens
         self._custom_system_prompt = system_prompt
+        self._system_prompt_header = system_prompt_header
         self.api_key = api_key
         self.base_url = base_url
         self.schema = schema
         self.max_retries = max_retries
         self._client: LLMClient | None = client
+        self._structured_outputs_param = structured_outputs
 
         # Normalize fields: dict → inline FieldSpec objects + field names list
         if isinstance(fields, dict):
@@ -90,6 +107,10 @@ class LLMStep:
         else:
             self._field_specs: dict[str, FieldSpec] = {}
             self.fields = fields
+
+        # Build and cache structured outputs format (field specs are immutable)
+        self._response_format = self._build_response_format()
+        self._use_structured_outputs = self._response_format.get("type") == "json_schema"
 
     @staticmethod
     def _normalize_field_specs(fields: dict[str, str | dict]) -> dict[str, FieldSpec]:
@@ -111,13 +132,65 @@ class LLMStep:
     def _resolve_client(self) -> LLMClient:
         """Lazily create or return the LLMClient."""
         if self._client is None:
-            from .providers.openai import OpenAIClient
-
             self._client = OpenAIClient(
                 api_key=self.api_key,
                 base_url=self.base_url,
             )
         return self._client
+
+    # -- response format -------------------------------------------------
+
+    def _build_response_format(self) -> dict:
+        """Determine the response_format based on auto-detection or explicit override.
+
+        Auto-detect logic:
+          - Custom schema → json_object (user manages validation)
+          - No field specs (list fields) → json_object
+          - Non-OpenAI client → json_object
+          - OpenAI with base_url and structured_outputs is None → json_object
+          - OpenAI native (no base_url) → json_schema
+          - structured_outputs=True → force json_schema
+          - structured_outputs=False → force json_object
+        """
+        # Explicit override
+        if self._structured_outputs_param is False:
+            return {"type": "json_object"}
+
+        if self._structured_outputs_param is True:
+            # Force on — requires field specs
+            if self._field_specs:
+                return build_json_schema(self._field_specs)
+            return {"type": "json_object"}
+
+        # Auto-detect (structured_outputs is None)
+
+        # Custom schema → json_object
+        if self.schema is not EnrichmentResult:
+            return {"type": "json_object"}
+
+        # No field specs (list[str] fields) → json_object
+        if not self._field_specs:
+            return {"type": "json_object"}
+
+        # Known providers that support structured outputs (json_schema)
+        if self._client is not None and not isinstance(self._client, OpenAIClient):
+            _supports_structured = (
+                (_AnthropicClient is not None and isinstance(self._client, _AnthropicClient))
+                or (_GoogleClient is not None and isinstance(self._client, _GoogleClient))
+            )
+
+            if _supports_structured:
+                return build_json_schema(self._field_specs)
+
+            # Unknown custom client → json_object (safe fallback)
+            return {"type": "json_object"}
+
+        # OpenAI with base_url → json_object (third-party compatibility)
+        if self.base_url is not None:
+            return {"type": "json_object"}
+
+        # Native OpenAI → json_schema
+        return build_json_schema(self._field_specs)
 
     # -- message building ------------------------------------------------
 
@@ -128,6 +201,7 @@ class LLMStep:
             row=ctx.row,
             prior_results=ctx.prior_results or None,
             custom_system_prompt=self._custom_system_prompt,
+            system_prompt_header=self._system_prompt_header,
         )
 
     # -- default enforcement ---------------------------------------------
@@ -201,12 +275,19 @@ class LLMStep:
                             model=self.model,
                             temperature=temperature,
                             max_tokens=max_tokens,
-                            response_format={"type": "json_object"},
+                            response_format=self._response_format,
                         )
 
                         content = response.content
                         parsed = json.loads(content)
-                        validated = self.schema.model_validate(parsed)
+
+                        # Validate: use dynamic model for structured outputs,
+                        # otherwise fall back to self.schema
+                        if self._use_structured_outputs:
+                            dynamic_model = build_response_model(self._field_specs)
+                            validated = dynamic_model.model_validate(parsed)
+                        else:
+                            validated = self.schema.model_validate(parsed)
                         all_values = validated.model_dump()
 
                         # Filter to declared fields
@@ -222,6 +303,7 @@ class LLMStep:
                                 "raw_response": content,
                                 "attempts": total_attempts,
                                 "api_retries": api_attempt,
+                                "structured_outputs": self._use_structured_outputs,
                             },
                         )
 

@@ -2,6 +2,8 @@
 
 A composable pipeline engine for structured data enrichment using LLMs. Define a pipeline of steps, point it at a DataFrame, and get structured results. Lattice handles orchestration: column-oriented batching, step dependencies, Pydantic validation, retries, checkpointing, and async concurrency.
 
+**Version-control your enrichment logic, iterate on prompts with cached intermediate results, and pay API costs instead of SaaS markups.**
+
 ## Features
 
 - **Composable pipeline** - Chain LLM calls, API lookups, and custom functions as steps with declared dependencies
