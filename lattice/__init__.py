@@ -15,7 +15,7 @@ from .steps import Step, StepContext, StepResult, FunctionStep, LLMStep
 from .schemas.base import CostSummary
 from .schemas.field_spec import FieldSpec
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __author__ = "Lattice Team"
 
 __all__ = [
