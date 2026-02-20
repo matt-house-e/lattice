@@ -86,6 +86,17 @@ class TestLLMStepConstruction:
         assert step.temperature == 0.2
         assert step._custom_system_prompt == "You are a bot."
 
+    def test_system_prompt_header_stored(self):
+        step = LLMStep(
+            name="llm", fields=["f1"],
+            system_prompt_header="Analyzing B2B SaaS companies.",
+        )
+        assert step._system_prompt_header == "Analyzing B2B SaaS companies."
+
+    def test_system_prompt_header_default_none(self):
+        step = LLMStep(name="llm", fields=["f1"])
+        assert step._system_prompt_header is None
+
     def test_field_spec_validation_rejects_unknown_keys(self):
         with pytest.raises(ValidationError, match="extra_forbidden"):
             LLMStep("llm", fields={
@@ -183,6 +194,17 @@ class TestLLMStepMessageBuilding:
         assert msg.startswith("Custom prompt.")
         # Custom prompt still gets XML data appended
         assert "<row_data>" in msg
+
+    def test_system_prompt_header_passed_to_builder(self):
+        step = LLMStep(
+            name="llm", fields={"f1": "test"},
+            system_prompt_header="Analyzing European markets.",
+        )
+        ctx = _make_ctx()
+        msg = step._build_system_message(ctx)
+
+        assert "# Context" in msg
+        assert "Analyzing European markets." in msg
 
     def test_dynamic_prompt_describes_used_keys_only(self):
         step = LLMStep(name="llm", fields={
@@ -490,3 +512,106 @@ class TestLLMStepCustomSchema:
 
         result = await step.run(_make_ctx())
         assert result.values == {"score": 0.95, "label": "positive"}
+
+
+# -- structured outputs --------------------------------------------------
+
+
+class TestStructuredOutputs:
+    def test_auto_on_for_native_openai_with_dict_fields(self):
+        """Native OpenAI (no base_url, no custom client) + dict fields → json_schema."""
+        step = LLMStep(name="llm", fields={"f1": "Estimate TAM"})
+        assert step._use_structured_outputs is True
+        assert step._response_format["type"] == "json_schema"
+
+    def test_auto_off_for_list_fields(self):
+        """list[str] fields (no specs) → json_object."""
+        step = LLMStep(name="llm", fields=["f1"])
+        assert step._use_structured_outputs is False
+        assert step._response_format == {"type": "json_object"}
+
+    def test_auto_off_for_custom_schema(self):
+        """Custom schema → json_object."""
+        class MySchema(BaseModel):
+            f1: str
+
+        step = LLMStep(name="llm", fields={"f1": "test"}, schema=MySchema)
+        assert step._use_structured_outputs is False
+
+    def test_auto_off_for_non_openai_client(self):
+        """Non-OpenAI client → json_object."""
+        mock_client = AsyncMock()
+        step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
+        assert step._use_structured_outputs is False
+
+    def test_auto_off_for_base_url(self):
+        """base_url set → json_object (third-party provider)."""
+        step = LLMStep(name="llm", fields={"f1": "test"}, base_url="http://localhost:11434/v1")
+        assert step._use_structured_outputs is False
+
+    def test_force_off(self):
+        """structured_outputs=False → json_object even for native OpenAI."""
+        step = LLMStep(name="llm", fields={"f1": "test"}, structured_outputs=False)
+        assert step._use_structured_outputs is False
+        assert step._response_format == {"type": "json_object"}
+
+    def test_force_on_for_base_url(self):
+        """structured_outputs=True forces json_schema even with base_url."""
+        step = LLMStep(
+            name="llm", fields={"f1": "test"},
+            base_url="http://api.groq.com/v1",
+            structured_outputs=True,
+        )
+        assert step._use_structured_outputs is True
+        assert step._response_format["type"] == "json_schema"
+
+    def test_force_on_without_field_specs_falls_back(self):
+        """structured_outputs=True but no field specs → json_object fallback."""
+        step = LLMStep(name="llm", fields=["f1"], structured_outputs=True)
+        assert step._use_structured_outputs is False
+
+    @pytest.mark.asyncio
+    async def test_response_format_passed_to_client(self):
+        """Verify the correct response_format dict reaches the client."""
+        resp = _mock_llm_response(json.dumps({"f1": "val"}))
+        mock_client = _make_mock_client(resp)
+
+        # Force json_object
+        step = LLMStep(
+            name="llm", fields={"f1": "test"},
+            client=mock_client, structured_outputs=False,
+        )
+        await step.run(_make_ctx())
+        call_kwargs = mock_client.complete.call_args
+        assert call_kwargs.kwargs["response_format"] == {"type": "json_object"}
+
+    @pytest.mark.asyncio
+    async def test_metadata_includes_structured_outputs_flag(self):
+        resp = _mock_llm_response(json.dumps({"f1": "val"}))
+        mock_client = _make_mock_client(resp)
+        step = LLMStep(
+            name="llm", fields={"f1": "test"},
+            client=mock_client, structured_outputs=False,
+        )
+        result = await step.run(_make_ctx())
+        assert result.metadata["structured_outputs"] is False
+
+    @pytest.mark.asyncio
+    async def test_structured_outputs_uses_dynamic_model(self):
+        """When structured outputs active, validation uses the dynamic model."""
+        resp = _mock_llm_response(json.dumps({"f1": "val"}))
+        mock_client = _make_mock_client(resp)
+        # Native OpenAI client → auto-enabled
+        from lattice.steps.providers.openai import OpenAIClient
+
+        step = LLMStep(
+            name="llm",
+            fields={"f1": "test"},
+            client=mock_client,  # not an OpenAIClient → auto OFF
+            structured_outputs=True,  # force on
+        )
+        # structured_outputs=True with field specs → force on
+        # But mock_client is not OpenAIClient, however force=True overrides
+        result = await step.run(_make_ctx())
+        assert result.values == {"f1": "val"}
+        assert result.metadata["structured_outputs"] is True

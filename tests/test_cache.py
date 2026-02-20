@@ -169,11 +169,12 @@ class TestComputeCacheKey:
 
 
 class _FakeLLMStep:
-    def __init__(self, name="llm", model="gpt-4.1-mini", temperature=0.2, system_prompt=None):
+    def __init__(self, name="llm", model="gpt-4.1-mini", temperature=0.2, system_prompt=None, system_prompt_header=None):
         self.name = name
         self.model = model
         self.temperature = temperature
         self._custom_system_prompt = system_prompt
+        self._system_prompt_header = system_prompt_header
 
 
 class _FakeFunctionStep:
@@ -218,6 +219,19 @@ class TestComputeStepCacheKey:
         k1 = _compute_step_cache_key(_FakeLLMStep(system_prompt="v1"), row, {}, {})
         k2 = _compute_step_cache_key(_FakeLLMStep(system_prompt="v2"), row, {}, {})
         assert k1 != k2
+
+    def test_different_system_prompt_header_different_key(self):
+        row = {"company": "Acme"}
+        k1 = _compute_step_cache_key(_FakeLLMStep(system_prompt_header="header v1"), row, {}, {})
+        k2 = _compute_step_cache_key(_FakeLLMStep(system_prompt_header="header v2"), row, {}, {})
+        assert k1 != k2
+
+    def test_system_prompt_header_none_vs_empty_same_key(self):
+        """None and empty string both normalize to '' for hashing."""
+        row = {"company": "Acme"}
+        k1 = _compute_step_cache_key(_FakeLLMStep(system_prompt_header=None), row, {}, {})
+        k2 = _compute_step_cache_key(_FakeLLMStep(system_prompt_header=""), row, {}, {})
+        assert k1 == k2
 
     def test_function_step_deterministic(self):
         step = _FakeFunctionStep(cache_version="v1")

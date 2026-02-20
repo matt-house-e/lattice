@@ -10,12 +10,21 @@ setup_logging(level="WARNING", format_type="console", include_timestamp=False)
 
 # Public API
 from .core import Enricher, EnrichmentConfig, EnrichmentError, FieldValidationError, RowError
+from .core.hooks import (
+    EnrichmentHooks,
+    PipelineStartEvent,
+    PipelineEndEvent,
+    StepStartEvent,
+    StepEndEvent,
+    RowCompleteEvent,
+)
 from .pipeline import Pipeline, PipelineResult
 from .steps import Step, StepContext, StepResult, FunctionStep, LLMStep
 from .schemas.base import CostSummary
 from .schemas.field_spec import FieldSpec
+from .utils.web_search import web_search
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __author__ = "Lattice Team"
 
 __all__ = [
@@ -25,12 +34,21 @@ __all__ = [
     "LLMStep",
     "FunctionStep",
     "EnrichmentConfig",
+    # Hooks
+    "EnrichmentHooks",
+    "PipelineStartEvent",
+    "PipelineEndEvent",
+    "StepStartEvent",
+    "StepEndEvent",
+    "RowCompleteEvent",
     # Step protocol
     "Step",
     "StepContext",
     "StepResult",
     # Schemas
     "FieldSpec",
+    # Utilities
+    "web_search",
     # Results & errors
     "CostSummary",
     "RowError",

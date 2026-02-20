@@ -35,11 +35,13 @@ class Enricher:
         pipeline: Pipeline,
         field_manager: Any = None,
         config: Optional[EnrichmentConfig] = None,
+        hooks: Any = None,
     ) -> None:
         self.pipeline = pipeline
         self.field_manager = field_manager
         self.config = config or EnrichmentConfig()
         self._checkpoint = CheckpointManager(self.config)
+        self._hooks = hooks
 
     # -- sync entry point ------------------------------------------------
 
@@ -191,6 +193,7 @@ class Enricher:
                 on_step_complete=on_step_complete,
                 cache_manager=cache_manager,
                 on_partial_checkpoint=on_partial_checkpoint,
+                hooks=self._hooks,
             )
         finally:
             if cache_manager is not None:

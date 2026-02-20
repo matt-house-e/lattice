@@ -1,7 +1,7 @@
 # Pipeline Architecture Design
 
-> **Status**: Phases 1-4 COMPLETE. Phase 5A next.
-> **Version**: v0.4
+> **Status**: Phases 1-5 COMPLETE. Phase 6A (Ship) next.
+> **Version**: v0.5
 > **Date**: February 2026
 
 ## Overview
@@ -200,9 +200,27 @@ class LLMResponse:
 
 **Import:** `from lattice.providers import OpenAIClient, AnthropicClient, GoogleClient`
 
+### Web Search Utility (Phase 5)
+
+**`web_search()` factory** (`lattice/utils/web_search.py`) — Convenience wrapper around OpenAI Responses API. Returns async callable for FunctionStep:
+
+```python
+from lattice import Pipeline, FunctionStep, LLMStep, web_search
+
+Pipeline([
+    FunctionStep("research",
+        fn=web_search("Research {company}: market position and competitors"),
+        fields=["__web_context", "sources"],
+    ),
+    LLMStep("analyze", fields={"market_size": "Estimate TAM"}, depends_on=["research"]),
+])
+```
+
+Parameters: `query` (template), `model="gpt-4.1-mini"`, `search_context_size="medium"`, `api_key`, `include_sources=True`. Graceful degradation on API errors (returns empty context). Custom FunctionStep still works for full control.
+
 ### No Built-in WebSearchStep
 
-**Decision (Feb 2026): WebSearchStep was scrapped.** FunctionStep already handles any data source — web search, APIs, databases. Users bring their own search provider:
+**Decision (Feb 2026): WebSearchStep was scrapped.** FunctionStep already handles any data source — web search, APIs, databases. The `web_search()` utility is a convenience factory, not a step type. Users bring their own search provider:
 
 ```python
 async def web_search(ctx):
@@ -389,19 +407,30 @@ You are a structured data enrichment engine...
 - XML per-field blocks only include defined keys (no empty tags)
 - Sandwich pattern: key constraints reiterated after data for long-context reliability
 
-### Three-Tier Prompt Customization
+### Three-Tier Prompt Customization (Phase 5)
 
 1. **Default** — Dynamic prompt builder handles everything
-2. **`system_prompt_header=`** — Inject domain context before field specs: `"You are analyzing B2B SaaS companies in the European market."`
+2. **`system_prompt_header=`** — Inject `# Context` section between Role and Field Specification Keys: `"You are analyzing B2B SaaS companies in the European market."` Ignored when `system_prompt` (Tier 3) is set.
 3. **`system_prompt=`** — Full override (existing, power users own the entire prompt)
 
-### Future: Structured Outputs Migration
+### Structured Outputs (Phase 5)
 
-Move from `response_format={"type": "json_object"}` (legacy) to `{"type": "json_schema", "strict": true}`. This enables:
-- Enum fields enforced at grammar level (constrained decoding)
-- Type enforcement (Number fields can't produce strings)
-- Dynamically built Pydantic model from field specs at runtime
-- Eliminates need for most parse retries
+Migrated from `response_format={"type": "json_object"}` (legacy) to `{"type": "json_schema", "strict": true}` for OpenAI. Dynamically builds Pydantic model from 7-key field specs via `lattice/steps/schema_builder.py`.
+
+**Auto-detection logic:**
+- Native OpenAI + dict fields → `json_schema` + `strict: true` (auto-enabled)
+- `base_url` providers → `json_object` (Ollama, Groq may not support it)
+- Non-OpenAI client → `json_object`
+- Custom `schema=` → `json_object` (user manages validation)
+- `list[str]` fields → `json_object` (no specs to build schema from)
+- `structured_outputs=True/False` → explicit override
+
+**Schema builder** (`lattice/steps/schema_builder.py`):
+- `build_response_model(field_specs)` → `type[BaseModel]` via `pydantic.create_model()`
+- Type mapping: `String→str, Number→float, Boolean→bool, Date→str, List[String]→list[str], JSON→dict[str,Any]`
+- Enum fields → `Literal["val1", "val2", ...]`
+- `extra="forbid"` → `additionalProperties: false` in schema
+- `build_json_schema(field_specs)` → `{"type": "json_schema", "json_schema": {"name": "enrichment_result", "schema": ..., "strict": True}}`
 
 Research: `docs/research/prompt-engineering.md`
 
@@ -685,7 +714,21 @@ This makes pandas a convenience dependency rather than a hard requirement for th
 8. **Checkpoint interval** — `checkpoint_interval=N` saves partial step progress every N rows via `asyncio.as_completed` pattern. Enricher wires callback to `CheckpointManager.save_step()`.
 9. **CacheManager wiring** — Created and closed in `run_async()` and `Enricher.run_async()` with `finally` guard.
 
-## Phase 5A: Ship (Epic #18)
+## Phase 5: Quality + Observability + DX — COMPLETE
+
+Four features closing competitive gaps vs. Instructor, Clay, and LangChain.
+
+### What was built
+
+1. **`system_prompt_header` (#34)** — Tier 2 prompt customization. `LLMStep(..., system_prompt_header="Analyzing B2B SaaS companies.")` injects `# Context` section between Role and Field Specification Keys. Cache key includes header hash. Ignored when `system_prompt` (Tier 3) is set.
+
+2. **Lifecycle hooks (#30)** — `EnrichmentHooks` dataclass with 5 typed event callbacks: `on_pipeline_start`, `on_pipeline_end`, `on_step_start`, `on_step_end`, `on_row_complete`. Passed to `run()`/`run_async()`. Sync + async hooks. Hook errors caught + logged. Events include timing, usage, cache status, errors. Subsumes #11 (streaming) via `on_row_complete`.
+
+3. **Structured outputs migration** — Auto-enabled `json_schema` + `strict: true` for native OpenAI with dict field specs. Dynamic Pydantic model built from FieldSpec definitions (`lattice/steps/schema_builder.py`). Auto-off for base_url, non-OpenAI, custom schema, list fields. `structured_outputs=True/False` override. `StepResult.metadata["structured_outputs"]` flag.
+
+4. **`web_search()` utility (#35)** — Factory wrapping OpenAI Responses API. `web_search("Research {company}: market")` returns async callable for FunctionStep. Template formatting from row + prior_results. Citation extraction. Graceful degradation on API errors.
+
+## Phase 6A: Ship (Epic #18)
 
 Minimum viable distribution. Get Lattice into users' hands.
 
@@ -694,11 +737,12 @@ Minimum viable distribution. Get Lattice into users' hands.
 - **PyPI publish** — `pip install lattice-enrichment`
 - **#21 docs fix** — Update github-standards.md for v0.3 components (quick win)
 
-## Phase 5B: Power User Features
+## Phase 6B: Power User Features
 
-- **Lifecycle hooks (#30)** — `EnrichmentHooks` with callbacks at pipeline/step/row boundaries. Enables Langfuse/Datadog/structlog integration without being dependencies.
-- **Three-tier prompt customization (#34)** — `system_prompt_header=` injection. Depends on Phase 3's dynamic prompt builder.
-- **Web search utility (#35)** — `web_search()` convenience function reducing boilerplate for the common two-step pattern.
+- **Conditional step execution** — `run_if`/`skip_if` on steps
+- **Waterfall enrichment pattern** — Utility for try-source-A, fall-back-to-B
+- **Intra-batch deduplication** — Deduplicate identical rows before API call
+- **Chunked execution** — `chunk_size=N` for memory-bounded processing
 - **CLI** — `lattice run --csv data.csv --fields fields.csv`
 
 ## Backlog Triage (Feb 2026)
@@ -706,7 +750,7 @@ Minimum viable distribution. Get Lattice into users' hands.
 | # | Issue | Decision | Reasoning |
 |---|-------|----------|-----------|
 | **#13** | Eval suite | **Closed (won't-fix)** | Conflicts with design principle: "Evals are user-level, not library-level." Lattice exposes data; users run their own evals. |
-| **#11** | Streaming output | **Kept, re-scope** | Written for v0.2 row-oriented model. In column-oriented execution, "streaming" = step-level progress (already have tqdm) or row-level callbacks (that's #30 hooks). May merge into #30. |
+| **#11** | Streaming output | **Closed** | Subsumed by lifecycle hooks (`EnrichmentHooks.on_row_complete`). |
 | **#12** | Sources/provenance | **Kept, deprioritized** | Partially addressed by web search two-step pattern (`sources` column). Full provenance is a post-launch differentiator per TECHNICAL-VISION.md. |
 
 ## Design Decisions Log
@@ -736,3 +780,9 @@ Minimum viable distribution. Get Lattice into users' hands.
 | No native Polars support (for now) | Feb 2026 | 77% of Python data practitioners use pandas. Zero LLM tools support Polars natively. `list[dict]` input covers Polars users. Revisit post-launch. |
 | Chunked execution is separate from Phase 4 | Feb 2026 | Changes execution model from column-oriented to chunk-oriented. Medium effort, depends on caching. Own issue in Phase 5B. |
 | Keep pandas as base dependency | Feb 2026 | Lattice's users are pandas users (enrichment workflows, Jupyter, CSV origins). Making pandas optional adds complexity for minimal benefit. |
+| Hooks on `run()`, not config or Pipeline | Feb 2026 | Config is serializable data; hooks are callables. Different runs may want different hooks. |
+| 5 hooks with typed event dataclasses | Feb 2026 | `on_pipeline_start/end`, `on_step_start/end`, `on_row_complete`. `on_row_error` merged into `on_row_complete` (check `event.error`). Simpler API. |
+| Hook errors silently caught + logged | Feb 2026 | Observability failures must not crash data pipelines. `except Exception` catches; `BaseException` propagates. |
+| Structured outputs auto-detect | Feb 2026 | On for native OpenAI + dict fields, off for base_url/non-OpenAI/custom schema/list fields. Overridable. |
+| `system_prompt_header` as Tier 2 | Feb 2026 | Injects `# Context` between Role and Keys. Ignored when full `system_prompt` override is set. Part of cache key. |
+| `web_search()` factory pattern | Feb 2026 | Returns async callable for FunctionStep. Not a step type. Graceful degradation on errors. |
