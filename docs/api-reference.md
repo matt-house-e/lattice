@@ -100,9 +100,13 @@ from lattice import LLMStep
 
 step = LLMStep(
     name="analyze",
-    fields=["market_size", "competition_level"],
-    model="gpt-4.1-nano",
-    temperature=0.3,
+    fields={
+        "market_size": "Estimate TAM in billions USD",
+        "competition_level": {
+            "prompt": "Rate competition level",
+            "enum": ["Low", "Medium", "High"],
+        },
+    },
     max_retries=2,
 )
 ```
@@ -112,20 +116,40 @@ step = LLMStep(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `name` | `str` | required | Step name (unique within pipeline) |
-| `fields` | `list[str]` | required | Field names this step produces |
+| `fields` | `list[str] \| dict[str, str \| dict]` | required | Field names or inline 7-key field specs |
 | `depends_on` | `list[str]` | `[]` | Step names this depends on |
-| `model` | `str` | `"gpt-4.1-nano"` | OpenAI model name |
-| `temperature` | `float` | `None` | Falls back to config, then `0.5` |
+| `model` | `str` | `"gpt-4.1-mini"` | OpenAI model name |
+| `temperature` | `float` | `None` | Falls back to config, then `0.2` |
 | `max_tokens` | `int` | `None` | Falls back to config, then `4000` |
-| `system_prompt` | `str` | `None` | Falls back to built-in enrichment prompt |
+| `system_prompt` | `str` | `None` | Overrides auto-generated prompt instructions (data sections still appended) |
 | `api_key` | `str` | `None` | Falls back to `OPENAI_API_KEY` env var |
+| `base_url` | `str` | `None` | OpenAI-compatible endpoint (Ollama, Groq, etc.) |
+| `client` | `LLMClient` | `None` | Any `LLMClient` protocol adapter |
 | `schema` | `Type[BaseModel]` | `EnrichmentResult` | Pydantic model for response validation |
 | `max_retries` | `int` | `2` | Retries on JSON/validation errors (error fed back to LLM) |
+
+### Field Specs (7-key)
+
+When `fields` is a dict, each value is validated as a `FieldSpec` with these keys:
+
+| Key | Type | Required | Description |
+|-----|------|----------|-------------|
+| `prompt` | `str` | Yes | The extraction instruction |
+| `type` | `str` | No | `String` (default), `Number`, `Boolean`, `Date`, `List[String]`, `JSON` |
+| `format` | `str` | No | Output format pattern (e.g. `"YYYY-MM-DD"`, `"$X.XB"`) |
+| `enum` | `list[str]` | No | Constrained value list |
+| `examples` | `list[str]` | No | Good output examples |
+| `bad_examples` | `list[str]` | No | Anti-patterns to avoid |
+| `default` | `Any` | No | Fallback value when data is insufficient (enforced in Python) |
+
+Unknown keys are rejected at construction time (`extra="forbid"`).
 
 ### Behavior
 
 - Lazy client initialization (no import-time API key check)
-- Builds system message with: system prompt + row data + field specs + prior step results
+- Dynamic system prompt: markdown headers + XML data boundaries (GPT-4.1 cookbook)
+- Only describes field spec keys actually used across the step's fields
+- Default enforcement: replaces LLM refusal text with field `default` values
 - On parse/validation error: appends error to conversation and retries
 - Returns `StepResult` with values filtered to declared fields only
 
@@ -287,10 +311,13 @@ result = EnrichmentResult(market_size="$50B", competition_level="High")
 print(result.model_dump())  # {"market_size": "$50B", "competition_level": "High"}
 ```
 
-### StructuredResult[T]
+### FieldSpec
 
-Generic wrapper with token usage tracking. Available for standalone use but not used in the core pipeline flow (LLMStep returns StepResult directly).
+Strict Pydantic model for the 7-key field specification. Used internally by LLMStep; also available for direct validation.
 
 ```python
-from lattice.schemas import StructuredResult
+from lattice import FieldSpec
+
+spec = FieldSpec(prompt="Estimate TAM", type="Number", format="$X.XB")
+spec.model_dump(exclude_none=True)  # {"prompt": "Estimate TAM", "type": "Number", "format": "$X.XB"}
 ```

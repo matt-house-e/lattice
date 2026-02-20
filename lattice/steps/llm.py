@@ -12,58 +12,32 @@ from pydantic import BaseModel, ValidationError
 from ..core.exceptions import StepError
 from ..schemas.base import UsageInfo
 from ..schemas.enrichment import EnrichmentResult
+from ..schemas.field_spec import FieldSpec
 from ..utils.logger import get_logger
 from .base import StepContext, StepResult
+from .prompt_builder import build_system_message
 from .providers.base import LLMAPIError, LLMClient, LLMResponse
 
 logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
-# Default system prompt — ported from v0.2 LLMChain._create_default_prompt()
+# Refusal detection for default enforcement
 # ---------------------------------------------------------------------------
-DEFAULT_SYSTEM_PROMPT = """\
-You are a structured data enrichment engine operating over tabular rows.
-Given one input row, a set of field specifications, and optional context \
-from prior processing steps, produce a JSON object with EXACTLY the \
-requested fields as keys and values that satisfy each field's constraints.
-
-Each field specification contains at least:
-  - prompt: the concrete instruction for this field
-  - instructions: format/refinement constraints
-  - data_type: expected type (e.g., String, Number, Boolean, Date, JSON, List[String])
-  - examples: optional examples of ideal outputs
-
-OUTPUT CONTRACT
-- Return ONLY a single valid JSON object. No prose, no code fences, no explanations.
-- Top-level keys MUST be exactly the field names present in Field Specifications.
-- Values MUST comply with each field's data_type and instructions.
-- Keep outputs concise and information-dense. Avoid filler language.
-- If the row and context are insufficient to answer a field, return \
-"Unable to determine" (String), null (for non-String types), or an empty \
-list (for list types). Never fabricate sources or numbers.
-- When context includes citations or sources and the field's instructions \
-ask for sources, include terse source references inline \
-(e.g., "… (Reuters, 2024)"). Do not add URLs unless clearly present in context.
-- Do not include any keys not requested. Do not include reasoning if not \
-explicitly requested.
-
-DECISION GUIDELINES
-- If sources contradict, prefer the most specific and recent context; \
-otherwise, prefer Row Data.
-- Follow examples to style the answer when provided, but never copy them verbatim.
-- Normalize simple formatting:
-  - Numbers: plain numerals; include units only if requested.
-  - Dates: ISO-8601 (YYYY-MM-DD) unless instructions specify another format.
-  - Lists: small, ordered by relevance; 4 items max unless otherwise stated.
-
-EXECUTION
-For each field:
-  1) Read prompt and instructions.
-  2) Check Row Data; then consult prior step results if helpful.
-  3) Produce an accurate value that satisfies data_type and instructions.
-  4) If insufficient evidence, use the fallback policy above without guessing.
-
-Return ONLY the final JSON object with the requested fields as keys."""
+REFUSAL_PATTERNS = frozenset({
+    "unable to determine",
+    "n/a",
+    "not available",
+    "not specified",
+    "insufficient data",
+    "unknown",
+    "not enough information",
+    "cannot determine",
+    "no data",
+    "no information",
+    "not applicable",
+    "data not available",
+    "information not available",
+})
 
 
 class LLMStep:
@@ -72,7 +46,9 @@ class LLMStep:
     Features:
       - Provider-agnostic via LLMClient protocol (OpenAI default).
       - Lazy client initialisation (no import-time API key check).
-      - Builds system message with: system prompt + row data + field specs + prior results.
+      - 7-key field spec validation via :class:`FieldSpec` on construction.
+      - Dynamic system prompt (markdown headers + XML data boundaries).
+      - Default enforcement: replaces LLM refusals with field ``default`` values.
       - Uses ``response_format={"type": "json_object"}``.
       - Validates response with Pydantic ``model_validate()``.
       - On validation/parse error: appends error to conversation and retries.
@@ -83,7 +59,7 @@ class LLMStep:
         name: str,
         fields: list[str] | dict[str, str | dict],
         depends_on: list[str] | None = None,
-        model: str = "gpt-4.1-nano",
+        model: str = "gpt-4.1-mini",
         temperature: float | None = None,
         max_tokens: int | None = None,
         system_prompt: str | None = None,
@@ -98,34 +74,34 @@ class LLMStep:
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.system_prompt = system_prompt or DEFAULT_SYSTEM_PROMPT
+        self._custom_system_prompt = system_prompt
         self.api_key = api_key
         self.base_url = base_url
         self.schema = schema
         self.max_retries = max_retries
         self._client: LLMClient | None = client
 
-        # Normalize fields: dict → inline specs + field names list
+        # Normalize fields: dict → inline FieldSpec objects + field names list
         if isinstance(fields, dict):
             self._field_specs = self._normalize_field_specs(fields)
             self.fields = list(fields.keys())
         else:
-            self._field_specs: dict[str, dict[str, Any]] = {}
+            self._field_specs: dict[str, FieldSpec] = {}
             self.fields = fields
 
     @staticmethod
-    def _normalize_field_specs(fields: dict[str, str | dict]) -> dict[str, dict[str, Any]]:
-        """Convert shorthand field specs to full dicts.
+    def _normalize_field_specs(fields: dict[str, str | dict]) -> dict[str, FieldSpec]:
+        """Convert shorthand field specs to validated FieldSpec objects.
 
-        ``{"market_size": "Estimate TAM"}`` → ``{"market_size": {"prompt": "Estimate TAM"}}``
-        ``{"market_size": {"prompt": "...", "type": "String"}}`` → passed through
+        ``{"market_size": "Estimate TAM"}`` → ``{"market_size": FieldSpec(prompt="Estimate TAM")}``
+        ``{"market_size": {"prompt": "...", "type": "String"}}`` → validated FieldSpec
         """
-        result: dict[str, dict[str, Any]] = {}
+        result: dict[str, FieldSpec] = {}
         for name, spec in fields.items():
             if isinstance(spec, str):
-                result[name] = {"prompt": spec}
+                result[name] = FieldSpec(prompt=spec)
             else:
-                result[name] = dict(spec)
+                result[name] = FieldSpec.model_validate(spec)
         return result
 
     # -- client ----------------------------------------------------------
@@ -144,15 +120,26 @@ class LLMStep:
     # -- message building ------------------------------------------------
 
     def _build_system_message(self, ctx: StepContext) -> str:
-        parts = [self.system_prompt]
-        parts.append("\n--- DATA ---")
-        parts.append(f"Row Data: {json.dumps(ctx.row, default=str)}")
-        # Use inline field specs if available, otherwise fall back to context
-        field_specs = self._field_specs if self._field_specs else ctx.fields
-        parts.append(f"Field Specifications: {json.dumps(field_specs, default=str)}")
-        if ctx.prior_results:
-            parts.append(f"Prior Step Results: {json.dumps(ctx.prior_results, default=str)}")
-        return "\n".join(parts)
+        """Build the full system message using the dynamic prompt builder."""
+        return build_system_message(
+            field_specs=self._field_specs,
+            row=ctx.row,
+            prior_results=ctx.prior_results or None,
+            custom_system_prompt=self._custom_system_prompt,
+        )
+
+    # -- default enforcement ---------------------------------------------
+
+    def _apply_defaults(self, values: dict[str, Any]) -> dict[str, Any]:
+        """Replace refusal values with field defaults where configured."""
+        for field_name, spec in self._field_specs.items():
+            if field_name not in values:
+                continue
+            if "default" not in spec.model_fields_set:
+                continue
+            if _is_refusal(values[field_name]):
+                values[field_name] = spec.default
+        return values
 
     # -- run -------------------------------------------------------------
 
@@ -170,7 +157,7 @@ class LLMStep:
         if temperature is None and ctx.config is not None:
             temperature = getattr(ctx.config, "temperature", None)
         if temperature is None:
-            temperature = 0.5
+            temperature = 0.2
 
         max_tokens = self.max_tokens
         if max_tokens is None and ctx.config is not None:
@@ -222,6 +209,9 @@ class LLMStep:
 
                         # Filter to declared fields
                         values = {k: v for k, v in all_values.items() if k in self.fields}
+
+                        # Apply default enforcement
+                        values = self._apply_defaults(values)
 
                         return StepResult(
                             values=values,
@@ -278,3 +268,13 @@ class LLMStep:
             f"LLMStep '{self.name}' API error after {api_max_retries + 1} retries: {last_api_error}",
             step_name=self.name,
         )
+
+
+def _is_refusal(value: Any) -> bool:
+    """Check if a value looks like an LLM refusal."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized == "" or normalized in REFUSAL_PATTERNS
+    return False

@@ -69,7 +69,7 @@ class EnrichmentConfig:
     auto_resume: bool = True
     """Automatically resume from checkpoint on re-run."""
 
-    # === Caching (Phase 3) ===
+    # === Caching (Phase 4) ===
     enable_caching: bool = False
     """Enable input-hash cache to skip redundant API calls."""
 

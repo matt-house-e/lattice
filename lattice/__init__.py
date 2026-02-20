@@ -13,6 +13,7 @@ from .core import Enricher, EnrichmentConfig, EnrichmentError, FieldValidationEr
 from .pipeline import Pipeline, PipelineResult
 from .steps import Step, StepContext, StepResult, FunctionStep, LLMStep
 from .schemas.base import CostSummary
+from .schemas.field_spec import FieldSpec
 
 __version__ = "0.3.0"
 __author__ = "Lattice Team"
@@ -28,6 +29,8 @@ __all__ = [
     "Step",
     "StepContext",
     "StepResult",
+    # Schemas
+    "FieldSpec",
     # Results & errors
     "CostSummary",
     "RowError",

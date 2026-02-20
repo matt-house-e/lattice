@@ -1,242 +1,227 @@
+"""Field management for the Lattice enrichment tool.
+
+Loads field categories and specifications from CSV files, producing dicts
+compatible with :class:`~lattice.schemas.field_spec.FieldSpec` and
+``LLMStep(fields=...)``.
+
+CSV format (v0.3 — 7-key spec)::
+
+    Category,Field,Prompt,Type,Format,Enum,Examples,Bad_Examples,Default
+
+Required columns: ``Category``, ``Field``, ``Prompt``.
+Optional columns: ``Type``, ``Format``, ``Enum``, ``Examples``,
+``Bad_Examples``, ``Default``.
+
+**Legacy support**: If ``Instructions`` or ``Guidance`` columns exist they
+are concatenated into ``prompt``.  If ``Data_Type`` exists and ``Type``
+does not, ``Data_Type`` is treated as ``Type``.
 """
-Field management for the Lattice enrichment tool.
 
-Manages field categories, their specifications, and examples.
-Handles loading, parsing, and accessing field definitions.
+from __future__ import annotations
 
-This is a cleaned up version of the original field_manager.py with:
-- Cleaner imports (no try/except blocks)
-- Better type hints
-- Simplified logging
-- Enhanced error messages
-"""
-
+import json
 import logging
-from typing import Dict, List, Optional
-import pandas as pd
 import os
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
 
 from ..core.exceptions import FieldValidationError
 
 logger = logging.getLogger(__name__)
 
+# Columns that MUST exist in every CSV
+REQUIRED_COLUMNS = ["Category", "Field", "Prompt"]
+
 
 class FieldManager:
-    """
-    Manages field categories, their specifications, and examples.
-    
-    Handles loading, parsing, and accessing field definitions from CSV files.
-    Validates field definitions and provides structured access to field data.
-    """
-    
-    REQUIRED_COLUMNS = ['Category', 'Field', 'Prompt', 'Instructions', 'Data_Type']
-    
+    """Loads field categories from CSV and provides structured access."""
+
     def __init__(self, fields_categories_path: str) -> None:
-        """
-        Initialize the FieldManager with field category definitions.
-        
-        Args:
-            fields_categories_path: Path to CSV file containing field categories and specifications
-            
-        Raises:
-            FieldValidationError: If the CSV file is invalid or missing required columns
-        """
         self.fields_categories_path = Path(fields_categories_path)
-        self.categories = self._load_field_categories(fields_categories_path)
+        self.categories: Dict[str, Dict[str, Dict[str, Any]]] = (
+            self._load_field_categories(fields_categories_path)
+        )
 
     @classmethod
-    def from_csv(cls, csv_path: str) -> 'FieldManager':
-        """
-        Factory method to create FieldManager from CSV file.
-        
-        Args:
-            csv_path: Path to the field categories CSV file
-            
-        Returns:
-            Configured FieldManager instance
-        """
+    def from_csv(cls, csv_path: str) -> FieldManager:
         return cls(csv_path)
 
-    def _load_field_categories(self, csv_path: str) -> Dict:
-        """
-        Load and parse field categories from CSV into structured dictionary.
-        
-        Args:
-            csv_path: Path to CSV file containing field category definitions
-            
-        Returns:
-            Dictionary mapping categories to their field specifications
-            
-        Raises:
-            FieldValidationError: If the CSV file is invalid, missing, or has incorrect format
-        """
-        try:
-            # Check if file exists
-            if not os.path.exists(csv_path):
-                raise FieldValidationError(f"Fields categories CSV file not found at: {csv_path}")
-            
-            # Try to read the CSV file
-            df = pd.read_csv(csv_path)
-            
-            # Check if DataFrame is empty
-            if df.empty:
-                raise FieldValidationError(f"Fields categories CSV file is empty: {csv_path}")
-            
-            # Validate required columns
-            missing_cols = [col for col in self.REQUIRED_COLUMNS if col not in df.columns]
-            if missing_cols:
-                raise FieldValidationError(
-                    f"Fields categories CSV missing required columns: {', '.join(missing_cols)}\n"
-                    f"Required columns: {', '.join(self.REQUIRED_COLUMNS)}\n"
-                    f"Found columns: {', '.join(df.columns)}"
-                )
-            
-            categories = {}
-            
-            # Process each row in the CSV
-            for idx, row in df.iterrows():
-                category = row['Category']
-                field = row['Field']
-                
-                # Validate required fields are not empty
-                if pd.isna(category) or pd.isna(field):
-                    logger.warning(f"Skipping row {idx} with empty Category or Field: {row.to_dict()}")
-                    continue
-                
-                # Create field specification dictionary
-                field_dict = {
-                    "prompt": row['Prompt'] if pd.notna(row['Prompt']) else "",
-                    "instructions": row['Instructions'] if pd.notna(row['Instructions']) else "",
-                    "type": row['Data_Type'] if pd.notna(row['Data_Type']) else "String"
-                }
-                
-                # Add examples if present (use name-based exclusion, not position)
-                KNOWN_COLUMNS = {
-                    'Category', 'Field', 'Prompt', 'Data_Type', 'Instructions',
-                    'Output_Format', 'Quality_Rules', 'Sources',
-                    'Good_Example', 'Bad_Example', 'Fallback',
-                }
-                examples = {}
-                for i, col in enumerate(
-                    (c for c in df.columns if c not in KNOWN_COLUMNS), start=1
-                ):
-                    if pd.notna(row[col]):
-                        examples[f"example_{i}"] = row[col]
-                if examples:
-                    field_dict["examples"] = examples
-                
-                # Add to categories dictionary
-                if category not in categories:
-                    categories[category] = {}
-                categories[category][field] = field_dict
-            
-            # Validate that at least one category was loaded
-            if not categories:
-                raise FieldValidationError(f"No valid categories found in CSV file: {csv_path}")
-            
-            logger.info(f"Successfully loaded {len(categories)} categories from {csv_path}")
-            for category_name, fields in categories.items():
-                logger.debug(f"Category '{category_name}': {len(fields)} fields")
-            
-            return categories
-            
-        except pd.errors.EmptyDataError:
-            raise FieldValidationError(f"CSV file is empty or has no data: {csv_path}")
-        except pd.errors.ParserError as e:
-            raise FieldValidationError(f"Invalid CSV format in {csv_path}: {str(e)}")
-        except Exception as e:
-            if isinstance(e, FieldValidationError):
-                raise  # Re-raise our custom exceptions
-            raise FieldValidationError(f"Failed to load field categories CSV {csv_path}: {str(e)}")
+    # -- loading ---------------------------------------------------------
 
-    def get_category_fields(self, category: str) -> Dict:
+    def _load_field_categories(
+        self, csv_path: str
+    ) -> Dict[str, Dict[str, Dict[str, Any]]]:
+        try:
+            if not os.path.exists(csv_path):
+                raise FieldValidationError(
+                    f"Fields categories CSV file not found at: {csv_path}"
+                )
+
+            df = pd.read_csv(csv_path)
+
+            if df.empty:
+                raise FieldValidationError(
+                    f"Fields categories CSV file is empty: {csv_path}"
+                )
+
+            # Validate required columns
+            missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+            if missing:
+                raise FieldValidationError(
+                    f"CSV missing required columns: {', '.join(missing)}\n"
+                    f"Required: {', '.join(REQUIRED_COLUMNS)}\n"
+                    f"Found: {', '.join(df.columns)}"
+                )
+
+            categories: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+            for idx, row in df.iterrows():
+                category = row["Category"]
+                field = row["Field"]
+
+                if pd.isna(category) or pd.isna(field):
+                    logger.warning(
+                        "Skipping row %d with empty Category or Field", idx
+                    )
+                    continue
+
+                spec = self._row_to_spec(row, df.columns.tolist())
+
+                categories.setdefault(str(category), {})[str(field)] = spec
+
+            if not categories:
+                raise FieldValidationError(
+                    f"No valid categories found in CSV file: {csv_path}"
+                )
+
+            logger.info(
+                "Loaded %d categories from %s", len(categories), csv_path
+            )
+            return categories
+
+        except pd.errors.EmptyDataError:
+            raise FieldValidationError(
+                f"CSV file is empty or has no data: {csv_path}"
+            )
+        except pd.errors.ParserError as e:
+            raise FieldValidationError(
+                f"Invalid CSV format in {csv_path}: {e}"
+            )
+        except FieldValidationError:
+            raise
+        except Exception as e:
+            raise FieldValidationError(
+                f"Failed to load field categories CSV {csv_path}: {e}"
+            )
+
+    @staticmethod
+    def _row_to_spec(row: Any, columns: list[str]) -> Dict[str, Any]:
+        """Convert a single CSV row to a field spec dict.
+
+        Handles legacy columns (Instructions, Guidance, Data_Type) and
+        new 7-key columns (Type, Format, Enum, Examples, Bad_Examples, Default).
         """
-        Get field specifications for a specific category.
-        
-        Args:
-            category: Category name to get fields for
-            
-        Returns:
-            Dictionary of fields and their specifications for the category
-            
-        Raises:
-            FieldValidationError: If the category doesn't exist
+        # -- prompt (required) + legacy concatenation
+        prompt = str(row["Prompt"]) if pd.notna(row["Prompt"]) else ""
+
+        # Legacy: concatenate Instructions / Guidance into prompt
+        for legacy_col in ("Instructions", "Guidance"):
+            if legacy_col in columns and pd.notna(row.get(legacy_col)):
+                extra = str(row[legacy_col]).strip()
+                if extra:
+                    prompt = f"{prompt}\n{extra}" if prompt else extra
+
+        spec: Dict[str, Any] = {"prompt": prompt}
+
+        # -- type (legacy Data_Type fallback)
+        type_val = None
+        if "Type" in columns and pd.notna(row.get("Type")):
+            type_val = str(row["Type"]).strip()
+        elif "Data_Type" in columns and pd.notna(row.get("Data_Type")):
+            type_val = str(row["Data_Type"]).strip()
+        if type_val:
+            spec["type"] = type_val
+
+        # -- format
+        if "Format" in columns and pd.notna(row.get("Format")):
+            spec["format"] = str(row["Format"]).strip()
+
+        # -- enum (comma-separated or JSON array)
+        if "Enum" in columns and pd.notna(row.get("Enum")):
+            spec["enum"] = _parse_list_column(row["Enum"])
+
+        # -- examples (comma-separated or JSON array)
+        if "Examples" in columns and pd.notna(row.get("Examples")):
+            spec["examples"] = _parse_list_column(row["Examples"])
+
+        # -- bad_examples
+        if "Bad_Examples" in columns and pd.notna(row.get("Bad_Examples")):
+            spec["bad_examples"] = _parse_list_column(row["Bad_Examples"])
+
+        # -- default
+        if "Default" in columns and pd.notna(row.get("Default")):
+            spec["default"] = str(row["Default"]).strip()
+
+        return spec
+
+    # -- access ----------------------------------------------------------
+
+    def get_category_fields(self, category: str) -> Dict[str, Dict[str, Any]]:
+        """Get field specs for a category.
+
+        Returns all spec keys (prompt, type, format, enum, examples,
+        bad_examples, default) — nothing is stripped.
         """
         if category not in self.categories:
-            available_categories = ", ".join(self.categories.keys())
+            available = ", ".join(self.categories.keys())
             raise FieldValidationError(
-                f"Category '{category}' not found. Available categories: {available_categories}"
+                f"Category '{category}' not found. "
+                f"Available categories: {available}"
             )
-            
-        category_fields = self.categories[category]
+        # Return copies so callers can't mutate internal state
         return {
-            field: {
-                "prompt": details["prompt"],
-                "type": details["type"],
-                "instructions": details["instructions"]
-            }
-            for field, details in category_fields.items()
+            field: dict(details)
+            for field, details in self.categories[category].items()
         }
 
     def get_categories(self) -> List[str]:
-        """
-        Get list of all available categories.
-        
-        Returns:
-            List of category names
-        """
         return list(self.categories.keys())
-        
+
     def validate_category(self, category: str) -> bool:
-        """
-        Check if a category exists.
-        
-        Args:
-            category: Category name to validate
-            
-        Returns:
-            True if category exists, False otherwise
-        """
         return category in self.categories
-    
+
     def get_field_count(self, category: Optional[str] = None) -> int:
-        """
-        Get count of fields in a category or total across all categories.
-        
-        Args:
-            category: Specific category to count, or None for total count
-            
-        Returns:
-            Number of fields
-        """
         if category is not None:
             if category not in self.categories:
                 return 0
             return len(self.categories[category])
-        
-        # Total across all categories
         return sum(len(fields) for fields in self.categories.values())
-    
+
     def __str__(self) -> str:
-        """String representation of FieldManager."""
-        total_fields = self.get_field_count()
-        categories_summary = ", ".join(
-            f"{cat}({len(fields)})" for cat, fields in self.categories.items()
+        total = self.get_field_count()
+        summary = ", ".join(
+            f"{cat}({len(fields)})"
+            for cat, fields in self.categories.items()
         )
-        return f"FieldManager({len(self.categories)} categories, {total_fields} total fields: {categories_summary})"
+        return (
+            f"FieldManager({len(self.categories)} categories, "
+            f"{total} total fields: {summary})"
+        )
 
 
-def load_fields(csv_path: str, category: Optional[str] = None) -> Dict[str, Dict]:
-    """Load field specs from CSV, suitable for passing to ``LLMStep(fields=...)``.
+def load_fields(
+    csv_path: str, category: Optional[str] = None
+) -> Dict[str, Dict[str, Any]]:
+    """Load field specs from CSV, suitable for ``LLMStep(fields=...)``.
 
     Args:
         csv_path: Path to the field categories CSV file.
         category: If provided, return only fields in this category.
-            If None, return all fields merged across categories.
 
     Returns:
-        Dict mapping field names to their specs (prompt, type, instructions).
+        Dict mapping field names to their 7-key spec dicts.
 
     Example::
 
@@ -247,7 +232,28 @@ def load_fields(csv_path: str, category: Optional[str] = None) -> Dict[str, Dict
     fm = FieldManager(csv_path)
     if category:
         return fm.get_category_fields(category)
-    all_fields: Dict[str, Dict] = {}
+    all_fields: Dict[str, Dict[str, Any]] = {}
     for cat in fm.get_categories():
         all_fields.update(fm.get_category_fields(cat))
     return all_fields
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _parse_list_column(value: Any) -> list[str]:
+    """Parse a CSV cell into a list of strings.
+
+    Tries JSON array first (``["a", "b"]``), falls back to comma-separated.
+    """
+    text = str(value).strip()
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return [str(v).strip() for v in parsed]
+        except json.JSONDecodeError:
+            pass
+    return [s.strip() for s in text.split(",") if s.strip()]

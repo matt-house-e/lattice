@@ -147,21 +147,19 @@ class TestInlineFieldSpecs:
             "competition": "Rate Low/Medium/High",
         })
         assert step.fields == ["market_size", "competition"]
-        assert step._field_specs == {
-            "market_size": {"prompt": "Estimate TAM in billions USD"},
-            "competition": {"prompt": "Rate Low/Medium/High"},
-        }
+        # _field_specs now stores FieldSpec objects
+        assert step._field_specs["market_size"].prompt == "Estimate TAM in billions USD"
+        assert step._field_specs["competition"].prompt == "Rate Low/Medium/High"
 
     def test_dict_full_spec(self):
         step = LLMStep("analyze", fields={
             "market_size": {
                 "prompt": "Estimate TAM",
                 "type": "String",
-                "instructions": "Include currency",
             },
         })
         assert step.fields == ["market_size"]
-        assert step._field_specs["market_size"]["type"] == "String"
+        assert step._field_specs["market_size"].type == "String"
 
     def test_list_fields_backward_compat(self):
         step = LLMStep("analyze", fields=["market_size", "competition"])
