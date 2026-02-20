@@ -231,13 +231,13 @@ class LLMStep:
 
         temperature = self.temperature
         if temperature is None and ctx.config is not None:
-            temperature = getattr(ctx.config, "temperature", None)
+            temperature = ctx.config.temperature
         if temperature is None:
             temperature = 0.2
 
         max_tokens = self.max_tokens
         if max_tokens is None and ctx.config is not None:
-            max_tokens = getattr(ctx.config, "max_tokens", None)
+            max_tokens = ctx.config.max_tokens
         if max_tokens is None:
             max_tokens = 4000
 
@@ -245,8 +245,8 @@ class LLMStep:
         api_max_retries = 3
         retry_base_delay = 1.0
         if ctx.config is not None:
-            api_max_retries = getattr(ctx.config, "max_retries", api_max_retries)
-            retry_base_delay = getattr(ctx.config, "retry_base_delay", retry_base_delay)
+            api_max_retries = ctx.config.max_retries
+            retry_base_delay = ctx.config.retry_base_delay
 
         system_content = self._build_system_message(ctx)
 

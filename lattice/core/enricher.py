@@ -128,16 +128,16 @@ class Enricher:
 
         # Set up cache manager
         cache_manager = None
-        if getattr(self.config, "enable_caching", False):
+        if self.config.enable_caching:
             from .cache import CacheManager
 
             cache_manager = CacheManager(
-                cache_dir=getattr(self.config, "cache_dir", ".lattice"),
-                ttl=getattr(self.config, "cache_ttl", 3600),
+                cache_dir=self.config.cache_dir,
+                ttl=self.config.cache_ttl,
             )
 
         # Set up partial checkpoint callback
-        checkpoint_interval = getattr(self.config, "checkpoint_interval", 0)
+        checkpoint_interval = self.config.checkpoint_interval
         on_partial_checkpoint = None
         if checkpoint_interval > 0 and self._checkpoint._enabled:
             def on_partial_checkpoint(step_name, partial_results, completed_count):

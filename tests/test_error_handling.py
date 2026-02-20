@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -91,7 +90,7 @@ class TestOnErrorRaise:
     async def test_raise_mode_raises_on_first_failure(self):
         p = Pipeline([_failing_step("s", ["f"], fail_indices={1})])
         rows = [{"__idx": 0}, {"__idx": 1}, {"__idx": 2}]
-        config = SimpleNamespace(max_workers=1, on_error="raise")
+        config = EnrichmentConfig(max_workers=1, on_error="raise")
 
         with pytest.raises(StepError, match="Row 1 failed"):
             await p.execute(rows, all_fields={}, config=config)
@@ -151,20 +150,13 @@ class TestRowError:
 class TestEnricherWithErrors:
     def test_enricher_returns_partial_results(self):
         """Enricher still returns a DataFrame when some rows fail."""
-        from unittest.mock import MagicMock
         from lattice.core.enricher import Enricher
-        from lattice.data.fields import FieldManager
 
         p = Pipeline([_failing_step("s", ["f"], fail_indices={1})])
 
-        fm = MagicMock(spec=FieldManager)
-        fm.validate_category.return_value = True
-        fm.get_categories.return_value = ["cat"]
-        fm.get_category_fields.return_value = {"f": {"prompt": "test"}}
-
-        enricher = Enricher(p, fm)
+        enricher = Enricher(p)
         df = pd.DataFrame({"__idx": [0, 1, 2]})
-        result = enricher.run(df, "cat")
+        result = enricher.run(df)
 
         assert "f" in result.columns
         assert result.at[0, "f"] == "f_value_0"

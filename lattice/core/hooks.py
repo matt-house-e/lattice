@@ -10,7 +10,10 @@ from __future__ import annotations
 import inspect
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
+if TYPE_CHECKING:
+    from .config import EnrichmentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +29,7 @@ class PipelineStartEvent:
 
     step_names: list[str]
     num_rows: int
-    config: Any
+    config: EnrichmentConfig
 
 
 @dataclass(frozen=True)

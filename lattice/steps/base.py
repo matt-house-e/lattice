@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Optional, Protocol, runtime_checkable
 
 from ..schemas.base import UsageInfo
+
+if TYPE_CHECKING:
+    from ..core.config import EnrichmentConfig
 
 
 @dataclass(frozen=True)
@@ -22,7 +25,7 @@ class StepContext:
     row: dict[str, Any]
     fields: dict[str, dict[str, Any]]
     prior_results: dict[str, Any]
-    config: Any = None
+    config: EnrichmentConfig | None = None
 
 
 @dataclass
