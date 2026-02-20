@@ -27,6 +27,20 @@ class FunctionStep:
         cache: bool = True,
         cache_version: str | None = None,
     ):
+        """Configure a function-based pipeline step.
+
+        Args:
+            name: Unique step name used in logs, cache keys, and
+                ``depends_on`` references.
+            fn: Sync or async callable that receives a :class:`StepContext`
+                and returns ``dict[str, Any]`` mapping field names to values.
+            fields: Field names this step produces (``list[str]`` only —
+                FunctionStep does not accept dict field specs).
+            depends_on: Names of steps whose outputs this step needs.
+            cache: Enable input-hash caching for this step (default True).
+            cache_version: Bump to invalidate cached results when the
+                function logic changes (e.g. ``"v2"``).
+        """
         self.name = name
         self.fn = fn
         self.fields = fields
@@ -36,6 +50,12 @@ class FunctionStep:
         self._is_async = asyncio.iscoroutinefunction(fn)
 
     async def run(self, ctx: StepContext) -> StepResult:
+        """Execute the wrapped callable and filter output to declared fields.
+
+        Sync functions run via ``run_in_executor`` to avoid blocking the
+        event loop.  The returned dict is filtered to only include keys
+        listed in ``self.fields``.
+        """
         if self._is_async:
             raw = await self.fn(ctx)
         else:

@@ -85,6 +85,49 @@ class LLMStep:
         cache: bool = True,
         structured_outputs: bool | None = None,
     ):
+        """Configure an LLM enrichment step.
+
+        Args:
+            name: Unique step name used in logs, cache keys, and ``depends_on``
+                references.
+            fields: Fields this step produces.  Two forms:
+
+                * ``list[str]`` — field names only (prompts come from CSV or
+                  external field specs).
+                * ``dict[str, str | dict]`` — inline field specs.  String
+                  values are shorthand for ``{"prompt": value}``.  Dict values
+                  are validated as :class:`FieldSpec` (keys: ``prompt``,
+                  ``type``, ``format``, ``enum``, ``examples``,
+                  ``bad_examples``, ``default``).
+
+            depends_on: Names of steps whose outputs this step needs.  The
+                pipeline resolves these as DAG edges.
+            model: Model identifier passed to the LLM provider.
+            temperature: Sampling temperature.  Falls back to
+                ``config.temperature`` then ``0.2``.
+            max_tokens: Maximum response tokens.  Falls back to
+                ``config.max_tokens`` then ``4000``.
+            system_prompt: **Tier 3** — fully replaces the auto-generated
+                system prompt.  Use only when the dynamic prompt builder
+                doesn't fit your needs.
+            system_prompt_header: **Tier 2** — injected as a ``# Context``
+                section between the Role header and the Field Specification
+                Keys.  Ignored when ``system_prompt`` is set.
+            api_key: Provider API key.  Falls back to the relevant env var
+                (e.g. ``OPENAI_API_KEY``).
+            base_url: OpenAI-compatible base URL (Ollama, Groq, etc.).
+                Disables structured-output auto-detection.
+            client: Pre-configured :class:`LLMClient` instance.  Overrides
+                ``api_key`` and ``base_url``.
+            schema: Pydantic model for response validation.  Default
+                ``EnrichmentResult`` works with dynamic field specs.
+            max_retries: Parse/validation retry attempts per API call.
+            cache: Enable input-hash caching for this step (default True).
+            structured_outputs: Override structured-output auto-detection.
+                ``True`` forces ``json_schema``; ``False`` forces
+                ``json_object``; ``None`` (default) auto-detects based on
+                provider and field specs.
+        """
         self.name = name
         self.depends_on = depends_on or []
         self.model = model
@@ -328,7 +371,9 @@ class LLMStep:
                 # All parse retries exhausted
                 raise StepError(
                     f"LLMStep '{self.name}' failed after {self.max_retries + 1} "
-                    f"parse attempts: {last_parse_error}",
+                    f"parse attempts (model={self.model}): {last_parse_error}. "
+                    f"Check that the model supports JSON output and that field "
+                    f"specs are unambiguous.",
                     step_name=self.name,
                 )
 
@@ -349,7 +394,9 @@ class LLMStep:
                     await asyncio.sleep(delay)
 
         raise StepError(
-            f"LLMStep '{self.name}' API error after {api_max_retries + 1} retries: {last_api_error}",
+            f"LLMStep '{self.name}' API error after {api_max_retries + 1} retries "
+            f"(model={self.model}): {last_api_error}. "
+            f"Check your API key, rate limits, and model availability.",
             step_name=self.name,
         )
 

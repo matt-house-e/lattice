@@ -78,13 +78,19 @@ class AnthropicClient:
             response = await client.messages.create(**kwargs)
         except RateLimitError as exc:
             raise LLMAPIError(
-                str(exc), status_code=429, is_rate_limit=True
+                f"Anthropic rate limit for model '{model}': {exc}",
+                status_code=429,
+                is_rate_limit=True,
             ) from exc
         except APITimeoutError as exc:
-            raise LLMAPIError(str(exc), status_code=408) from exc
+            raise LLMAPIError(
+                f"Anthropic timeout for model '{model}': {exc}",
+                status_code=408,
+            ) from exc
         except APIError as exc:
             raise LLMAPIError(
-                str(exc), status_code=getattr(exc, "status_code", None)
+                f"Anthropic API error for model '{model}': {exc}",
+                status_code=getattr(exc, "status_code", None),
             ) from exc
 
         content = response.content[0].text if response.content else ""

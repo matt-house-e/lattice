@@ -9,7 +9,7 @@ from .utils.logger import setup_logging
 setup_logging(level="WARNING", format_type="console", include_timestamp=False)
 
 # Public API
-from .core import Enricher, EnrichmentConfig, EnrichmentError, FieldValidationError, RowError
+from .core import Enricher, EnrichmentConfig, EnrichmentError, FieldValidationError, StepError, PipelineError, RowError
 from .core.hooks import (
     EnrichmentHooks,
     PipelineStartEvent,
@@ -54,6 +54,8 @@ __all__ = [
     "RowError",
     "EnrichmentError",
     "FieldValidationError",
+    "StepError",
+    "PipelineError",
     # Internal runner (power users)
     "Enricher",
 ]

@@ -83,11 +83,18 @@ class GoogleClient:
             exc_str = str(exc).lower()
             if "429" in exc_str or "rate" in exc_str:
                 raise LLMAPIError(
-                    str(exc), status_code=429, is_rate_limit=True
+                    f"Google rate limit for model '{model}': {exc}",
+                    status_code=429,
+                    is_rate_limit=True,
                 ) from exc
             if "timeout" in exc_str:
-                raise LLMAPIError(str(exc), status_code=408) from exc
-            raise LLMAPIError(str(exc)) from exc
+                raise LLMAPIError(
+                    f"Google timeout for model '{model}': {exc}",
+                    status_code=408,
+                ) from exc
+            raise LLMAPIError(
+                f"Google API error for model '{model}': {exc}"
+            ) from exc
 
         content = response.text or ""
         usage = None

@@ -10,7 +10,13 @@ from typing import Optional, List, Dict, Any
 
 
 class EnrichmentError(Exception):
-    """Base exception for all enrichment-related errors."""
+    """Base exception for all enrichment-related errors.
+
+    Attributes:
+        message: Human-readable error description.
+        row_index: Row that triggered the error (``None`` for non-row errors).
+        field: Field name involved (``None`` if not field-specific).
+    """
 
     def __init__(self, message: str, row_index: Optional[int] = None, field: Optional[str] = None):
         self.message = message
@@ -28,7 +34,14 @@ class EnrichmentError(Exception):
 
 
 class FieldValidationError(EnrichmentError):
-    """Raised when field definitions are invalid or missing."""
+    """Raised when field definitions are invalid or missing.
+
+    Common causes:
+        - Unknown keys in a field spec (only ``prompt``, ``type``, ``format``,
+          ``enum``, ``examples``, ``bad_examples``, ``default`` are allowed).
+        - Missing required ``prompt`` key in a dict field spec.
+        - Invalid ``type`` or ``enum`` values.
+    """
     pass
 
 
@@ -38,7 +51,14 @@ class ConfigurationError(EnrichmentError):
 
 
 class StepError(EnrichmentError):
-    """Raised when a pipeline step fails."""
+    """Raised when a pipeline step fails after exhausting retries.
+
+    Typical causes: all parse/validation retries exhausted, or all API
+    retries exhausted for an LLMStep.
+
+    Attributes:
+        step_name: Name of the step that failed (``None`` if unknown).
+    """
 
     def __init__(self, message: str, step_name: Optional[str] = None, **kwargs: Any):
         self.step_name = step_name
@@ -46,7 +66,13 @@ class StepError(EnrichmentError):
 
 
 class PipelineError(EnrichmentError):
-    """Raised when pipeline construction or execution fails."""
+    """Raised when pipeline construction or execution fails.
+
+    Common causes:
+        - Duplicate step names.
+        - A step's ``depends_on`` references a step that doesn't exist.
+        - The dependency graph contains a cycle.
+    """
     pass
 
 
