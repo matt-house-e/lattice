@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
+from lattice.core.config import EnrichmentConfig
 from lattice.core.exceptions import StepError
 from lattice.schemas.base import UsageInfo
 from lattice.schemas.field_spec import FieldSpec
@@ -262,7 +262,7 @@ class TestLLMStepRun:
         mock_client = _make_mock_client(resp)
         step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
 
-        config = SimpleNamespace(temperature=0.1, max_tokens=500, max_workers=3)
+        config = EnrichmentConfig(temperature=0.1, max_tokens=500, max_workers=3)
         ctx = _make_ctx(config=config)
         await step.run(ctx)
 
@@ -414,7 +414,7 @@ class TestLLMStepAPIRetries:
                 good_resp,
             ]
         )
-        config = SimpleNamespace(
+        config = EnrichmentConfig(
             temperature=0.2, max_tokens=100, max_retries=2, retry_base_delay=0.01,
         )
         step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
@@ -433,7 +433,7 @@ class TestLLMStepAPIRetries:
                 good_resp,
             ]
         )
-        config = SimpleNamespace(
+        config = EnrichmentConfig(
             temperature=0.2, max_tokens=100, max_retries=2, retry_base_delay=0.01,
         )
         step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
@@ -447,7 +447,7 @@ class TestLLMStepAPIRetries:
         mock_client.complete = AsyncMock(
             side_effect=LLMAPIError("rate limited", status_code=429, is_rate_limit=True)
         )
-        config = SimpleNamespace(
+        config = EnrichmentConfig(
             temperature=0.2, max_tokens=100, max_retries=1, retry_base_delay=0.01,
         )
         step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
@@ -465,7 +465,7 @@ class TestLLMStepAPIRetries:
                 good_resp,
             ]
         )
-        config = SimpleNamespace(
+        config = EnrichmentConfig(
             temperature=0.2, max_tokens=100, max_retries=2, retry_base_delay=0.001,
         )
         step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
@@ -484,7 +484,7 @@ class TestLLMStepAPIRetries:
                 bad_parse_resp,  # parse attempt 2 fails → parse retries exhausted → StepError
             ]
         )
-        config = SimpleNamespace(
+        config = EnrichmentConfig(
             temperature=0.2, max_tokens=100, max_retries=2, retry_base_delay=0.01,
         )
         step = LLMStep(name="llm", fields=["f1"], client=mock_client, max_retries=1)

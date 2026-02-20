@@ -4,13 +4,18 @@ Saves pipeline progress after each step completes across all rows.
 Single JSON file per data_identifier + category.
 """
 
+from __future__ import annotations
+
 import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from ..utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from .config import EnrichmentConfig
 
 logger = get_logger(__name__)
 
@@ -36,12 +41,12 @@ class CheckpointManager:
     dependency routing.
     """
 
-    def __init__(self, config: Any) -> None:
-        self._enabled = getattr(config, "enable_checkpointing", False)
-        self._auto_resume = getattr(config, "auto_resume", True)
+    def __init__(self, config: EnrichmentConfig) -> None:
+        self._enabled = config.enable_checkpointing
+        self._auto_resume = config.auto_resume
         self._checkpoint_dir: Path | None = None
 
-        raw_dir = getattr(config, "checkpoint_dir", None)
+        raw_dir = config.checkpoint_dir
         if raw_dir is not None:
             self._checkpoint_dir = Path(raw_dir)
 

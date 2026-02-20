@@ -198,7 +198,7 @@ class TestPipelineExecution:
     @pytest.mark.asyncio
     async def test_config_max_workers(self):
         """Verify semaphore uses config.max_workers."""
-        from types import SimpleNamespace
+        from lattice.core.config import EnrichmentConfig
 
         call_count = 0
 
@@ -209,7 +209,7 @@ class TestPipelineExecution:
             return {"f": call_count}
 
         p = Pipeline([FunctionStep("a", fn=slow_fn, fields=["f"])])
-        config = SimpleNamespace(max_workers=2, on_error="continue")
+        config = EnrichmentConfig(max_workers=2, on_error="continue")
         results, errors, cost = await p.execute(
             [{"x": i} for i in range(5)],
             all_fields={},

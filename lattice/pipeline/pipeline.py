@@ -10,6 +10,7 @@ from typing import Any, Callable, Optional
 import pandas as pd
 from tqdm.auto import tqdm
 
+from ..core.config import EnrichmentConfig
 from ..core.exceptions import PipelineError, RowError
 from ..core.hooks import (
     EnrichmentHooks,
@@ -89,7 +90,7 @@ class Pipeline:
     def run(
         self,
         data: pd.DataFrame | list[dict[str, Any]],
-        config: Any = None,
+        config: EnrichmentConfig | None = None,
         hooks: EnrichmentHooks | None = None,
     ) -> PipelineResult:
         """Synchronous entry point — the ONE way to use Lattice.
@@ -113,12 +114,10 @@ class Pipeline:
     async def run_async(
         self,
         data: pd.DataFrame | list[dict[str, Any]],
-        config: Any = None,
+        config: EnrichmentConfig | None = None,
         hooks: EnrichmentHooks | None = None,
     ) -> PipelineResult:
         """Async entry point. Accepts DataFrame or list[dict]."""
-        from ..core.config import EnrichmentConfig
-
         config = config or EnrichmentConfig()
         hooks = hooks or EnrichmentHooks()
 
@@ -135,12 +134,12 @@ class Pipeline:
 
         # Set up cache manager
         cache_manager = None
-        if getattr(config, "enable_caching", False):
+        if config.enable_caching:
             from ..core.cache import CacheManager
 
             cache_manager = CacheManager(
-                cache_dir=getattr(config, "cache_dir", ".lattice"),
-                ttl=getattr(config, "cache_ttl", 3600),
+                cache_dir=config.cache_dir,
+                ttl=config.cache_ttl,
             )
 
         # Fire on_pipeline_start
@@ -190,7 +189,7 @@ class Pipeline:
             df_out = self._build_result_df(data, accumulated, config)
             return PipelineResult(data=df_out, cost=cost, errors=errors)
 
-    def runner(self, config: Any = None) -> Any:
+    def runner(self, config: EnrichmentConfig | None = None) -> Any:
         """Power user: returns a reusable Enricher with config.
 
         Use for repeated execution, checkpointing, or server contexts.
@@ -238,12 +237,12 @@ class Pipeline:
         self,
         df: pd.DataFrame,
         accumulated: list[dict[str, Any]],
-        config: Any = None,
+        config: EnrichmentConfig | None = None,
     ) -> pd.DataFrame:
         """Build result DataFrame from accumulated step outputs."""
         overwrite_fields = True
         if config is not None:
-            overwrite_fields = getattr(config, "overwrite_fields", overwrite_fields)
+            overwrite_fields = config.overwrite_fields
 
         df_out = df.copy()
         for idx in range(len(df_out)):
@@ -324,7 +323,7 @@ class Pipeline:
         self,
         rows: list[dict[str, Any]],
         all_fields: dict[str, dict[str, Any]],
-        config: Any = None,
+        config: EnrichmentConfig | None = None,
         prior_step_results: Optional[dict[str, list[dict[str, Any]]]] = None,
         on_step_complete: Optional[Callable[[str, list[dict[str, Any]]], None]] = None,
         cache_manager: Any = None,
@@ -349,21 +348,10 @@ class Pipeline:
         """
         hooks = hooks or EnrichmentHooks()
 
-        max_workers = 3
-        if config is not None:
-            max_workers = getattr(config, "max_workers", max_workers)
-
-        on_error = "continue"
-        if config is not None:
-            on_error = getattr(config, "on_error", on_error)
-
-        show_progress = True
-        if config is not None:
-            show_progress = getattr(config, "enable_progress_bar", show_progress)
-
-        checkpoint_interval = 0
-        if config is not None:
-            checkpoint_interval = getattr(config, "checkpoint_interval", 0)
+        max_workers = config.max_workers if config is not None else 3
+        on_error = config.on_error if config is not None else "continue"
+        show_progress = config.enable_progress_bar if config is not None else True
+        checkpoint_interval = config.checkpoint_interval if config is not None else 0
 
         semaphore = asyncio.Semaphore(max_workers)
         num_rows = len(rows)
@@ -468,7 +456,7 @@ class Pipeline:
         step: Step,
         rows: list[dict[str, Any]],
         all_fields: dict[str, dict[str, Any]],
-        config: Any,
+        config: EnrichmentConfig | None,
         step_values: dict[str, list[dict[str, Any]]],
         semaphore: asyncio.Semaphore,
         num_rows: int,
