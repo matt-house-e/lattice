@@ -37,3 +37,4 @@ New architectural decisions get an ADR at decision time. CLAUDE.md and MEMORY.md
 | 008 | [Lifecycle hooks on run(), not config](008-hooks-on-run.md) | Accepted |
 | 009 | [Structured outputs auto-detect](009-structured-outputs-auto-detect.md) | Accepted |
 | 010 | [No eval tooling](010-no-eval-tooling.md) | Accepted |
+| 011 | [Conditional step execution via run_if/skip_if](011-conditional-step-predicates.md) | Accepted |
