@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time as _time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -26,6 +27,43 @@ from ..steps.base import Step, StepContext, StepResult
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Conditional step helpers
+# ---------------------------------------------------------------------------
+
+
+async def _evaluate_predicate(predicate: Callable, row: dict, prior_results: dict) -> bool:
+    """Call a sync or async predicate, returning its bool result."""
+    result = predicate(row, prior_results)
+    if inspect.isawaitable(result):
+        result = await result
+    return bool(result)
+
+
+async def _should_skip_row(step: Any, row: dict, prior_results: dict) -> bool:
+    """Evaluate run_if/skip_if on a step.  Returns True if row should be skipped."""
+    run_if = getattr(step, "run_if", None)
+    skip_if = getattr(step, "skip_if", None)
+    if run_if is not None:
+        return not await _evaluate_predicate(run_if, row, prior_results)
+    if skip_if is not None:
+        return await _evaluate_predicate(skip_if, row, prior_results)
+    return False
+
+
+def _build_skip_values(step: Any) -> dict[str, Any]:
+    """Build default values for skipped rows using FieldSpec defaults where available."""
+    field_specs = getattr(step, "_field_specs", {})
+    values: dict[str, Any] = {}
+    for field_name in step.fields:
+        spec = field_specs.get(field_name)
+        if spec is not None and "default" in spec.model_fields_set:
+            values[field_name] = spec.default
+        else:
+            values[field_name] = None
+    return values
 
 
 @dataclass
@@ -565,19 +603,27 @@ class Pipeline:
 
         cache_hits = 0
         cache_misses = 0
+        rows_skipped = 0
         step_cache_enabled = cache_manager is not None and getattr(step, "cache", True)
 
-        # Track per-row from_cache status
+        # Track per-row from_cache and skipped status
         row_from_cache: list[bool] = [False] * num_rows
+        row_was_skipped: list[bool] = [False] * num_rows
 
         async def process_row(idx: int) -> StepResult | BaseException:
-            nonlocal cache_hits, cache_misses
+            nonlocal cache_hits, cache_misses, rows_skipped
             async with semaphore:
                 # Gather prior results from dependency steps
                 prior: dict[str, Any] = {}
                 for dep_name in step.depends_on:
                     if dep_name in step_values:
                         prior.update(step_values[dep_name][idx])
+
+                # Evaluate run_if/skip_if predicate
+                if await _should_skip_row(step, rows[idx], prior):
+                    rows_skipped += 1
+                    row_was_skipped[idx] = True
+                    return StepResult(values=_build_skip_values(step))
 
                 cache_key = None
                 if step_cache_enabled:
@@ -637,6 +683,7 @@ class Pipeline:
                         values={f: None for f in step.fields},
                         error=exc,
                         from_cache=False,
+                        skipped=row_was_skipped[idx],
                     ))
 
                     if on_error == "raise":
@@ -657,6 +704,7 @@ class Pipeline:
                         values=result_or_none.values,
                         error=None,
                         from_cache=row_from_cache[idx],
+                        skipped=row_was_skipped[idx],
                     ))
 
                 completed_count += 1
@@ -688,6 +736,7 @@ class Pipeline:
                         values={f: None for f in step.fields},
                         error=result_or_exc,
                         from_cache=False,
+                        skipped=row_was_skipped[idx],
                     ))
 
                     if on_error == "raise":
@@ -706,13 +755,14 @@ class Pipeline:
                         values=result_or_exc.values,
                         error=None,
                         from_cache=row_from_cache[idx],
+                        skipped=row_was_skipped[idx],
                     ))
 
         step_values[step.name] = results
 
         # Aggregate usage for this step
         step_usage: StepUsage | None = None
-        if usage_list or cache_hits > 0 or cache_misses > 0:
+        if usage_list or cache_hits > 0 or cache_misses > 0 or rows_skipped > 0:
             # rows_processed: when caching is active, count via cache stats
             # (FunctionSteps don't emit usage, so len(usage_list) would be 0)
             if step_cache_enabled:
@@ -725,6 +775,7 @@ class Pipeline:
                 completion_tokens=sum(u.completion_tokens for u in usage_list),
                 total_tokens=sum(u.total_tokens for u in usage_list),
                 rows_processed=rows_processed,
+                rows_skipped=rows_skipped,
                 model=usage_list[0].model if usage_list else "",
                 cache_hits=cache_hits,
                 cache_misses=cache_misses,

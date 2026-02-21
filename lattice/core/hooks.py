@@ -71,6 +71,7 @@ class RowCompleteEvent:
     values: dict[str, Any]
     error: BaseException | None
     from_cache: bool
+    skipped: bool = False
 
 
 # ---------------------------------------------------------------------------

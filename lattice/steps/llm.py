@@ -9,7 +9,7 @@ from typing import Any, Optional, Type
 
 from pydantic import BaseModel, ValidationError
 
-from ..core.exceptions import StepError
+from ..core.exceptions import PipelineError, StepError
 from ..schemas.base import UsageInfo
 from ..schemas.enrichment import EnrichmentResult
 from ..schemas.field_spec import FieldSpec
@@ -84,6 +84,8 @@ class LLMStep:
         max_retries: int = 2,
         cache: bool = True,
         structured_outputs: bool | None = None,
+        run_if: Callable[..., Any] | None = None,
+        skip_if: Callable[..., Any] | None = None,
     ):
         """Configure an LLM enrichment step.
 
@@ -127,7 +129,18 @@ class LLMStep:
                 ``True`` forces ``json_schema``; ``False`` forces
                 ``json_object``; ``None`` (default) auto-detects based on
                 provider and field specs.
+            run_if: Predicate ``(row, prior_results) -> bool``.  When set,
+                the step only runs for rows where the predicate returns True.
+                Mutually exclusive with ``skip_if``.
+            skip_if: Predicate ``(row, prior_results) -> bool``.  When set,
+                the step is skipped for rows where the predicate returns True.
+                Mutually exclusive with ``run_if``.
         """
+        if run_if is not None and skip_if is not None:
+            raise PipelineError(
+                f"Step '{name}' has both run_if and skip_if set. "
+                f"These are mutually exclusive — use one or the other."
+            )
         self.name = name
         self.depends_on = depends_on or []
         self.model = model
@@ -142,6 +155,8 @@ class LLMStep:
         self.max_retries = max_retries
         self._client: LLMClient | None = client
         self._structured_outputs_param = structured_outputs
+        self.run_if = run_if
+        self.skip_if = skip_if
 
         # Normalize fields: dict → inline FieldSpec objects + field names list
         if isinstance(fields, dict):

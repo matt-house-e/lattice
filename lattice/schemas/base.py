@@ -27,6 +27,7 @@ class StepUsage(BaseModel):
         completion_tokens: Total completion tokens across all rows.
         total_tokens: Sum of prompt and completion tokens.
         rows_processed: Number of rows executed (cache hits + misses).
+        rows_skipped: Rows skipped by ``run_if``/``skip_if`` predicates.
         model: Model identifier used by this step.
         cache_hits: Rows served from the SQLite cache.
         cache_misses: Rows that required a fresh LLM/function call.
@@ -36,6 +37,7 @@ class StepUsage(BaseModel):
     completion_tokens: int = 0
     total_tokens: int = 0
     rows_processed: int = 0
+    rows_skipped: int = 0
     model: str = ""
     cache_hits: int = 0
     cache_misses: int = 0
