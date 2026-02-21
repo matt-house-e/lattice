@@ -13,6 +13,7 @@ from ..core.exceptions import PipelineError, StepError
 from ..schemas.base import UsageInfo
 from ..schemas.enrichment import EnrichmentResult
 from ..schemas.field_spec import FieldSpec
+from ..schemas.grounding import Citation, GroundingConfig
 from ..utils.logger import get_logger
 from .base import StepContext, StepResult
 from .prompt_builder import build_system_message
@@ -84,6 +85,7 @@ class LLMStep:
         max_retries: int = 2,
         cache: bool = True,
         structured_outputs: bool | None = None,
+        grounding: bool | dict | GroundingConfig | None = None,
         run_if: Callable[..., Any] | None = None,
         skip_if: Callable[..., Any] | None = None,
     ):
@@ -129,6 +131,11 @@ class LLMStep:
                 ``True`` forces ``json_schema``; ``False`` forces
                 ``json_object``; ``None`` (default) auto-detects based on
                 provider and field specs.
+            grounding: Enable provider-level web search grounding.
+                ``True`` enables with defaults, a ``dict`` or
+                :class:`GroundingConfig` allows fine-grained control
+                (``allowed_domains``, ``blocked_domains``, ``user_location``,
+                ``max_searches``).  ``None`` or ``False`` disables.
             run_if: Predicate ``(row, prior_results) -> bool``.  When set,
                 the step only runs for rows where the predicate returns True.
                 Mutually exclusive with ``skip_if``.
@@ -157,6 +164,9 @@ class LLMStep:
         self._structured_outputs_param = structured_outputs
         self.run_if = run_if
         self.skip_if = skip_if
+
+        # Normalize grounding config: True → GroundingConfig(), dict → validated
+        self._grounding_config: GroundingConfig | None = _normalize_grounding(grounding)
 
         # Normalize fields: dict → inline FieldSpec objects + field names list
         if isinstance(fields, dict):
@@ -262,6 +272,24 @@ class LLMStep:
             system_prompt_header=self._system_prompt_header,
         )
 
+    # -- tools -----------------------------------------------------------
+
+    def _build_tools_config(self) -> list[dict[str, Any]] | None:
+        """Build the tools list for the LLM client when grounding is enabled."""
+        if self._grounding_config is None:
+            return None
+        tool: dict[str, Any] = {"type": "web_search"}
+        cfg = self._grounding_config
+        if cfg.allowed_domains:
+            tool["allowed_domains"] = cfg.allowed_domains
+        if cfg.blocked_domains:
+            tool["blocked_domains"] = cfg.blocked_domains
+        if cfg.user_location:
+            tool["user_location"] = cfg.user_location
+        if cfg.max_searches is not None:
+            tool["max_searches"] = cfg.max_searches
+        return [tool]
+
     # -- default enforcement ---------------------------------------------
 
     def _apply_defaults(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -307,6 +335,7 @@ class LLMStep:
             retry_base_delay = ctx.config.retry_base_delay
 
         system_content = self._build_system_message(ctx)
+        tools = self._build_tools_config()
 
         last_api_error: BaseException | None = None
         total_attempts = 0
@@ -328,13 +357,26 @@ class LLMStep:
                 for parse_attempt in range(self.max_retries + 1):
                     total_attempts += 1
                     try:
-                        response: LLMResponse = await client.complete(
-                            messages=messages,
-                            model=self.model,
-                            temperature=temperature,
-                            max_tokens=max_tokens,
-                            response_format=self._response_format,
-                        )
+                        try:
+                            response: LLMResponse = await client.complete(
+                                messages=messages,
+                                model=self.model,
+                                temperature=temperature,
+                                max_tokens=max_tokens,
+                                response_format=self._response_format,
+                                tools=tools,
+                            )
+                        except TypeError:
+                            if tools is not None:
+                                raise StepError(
+                                    f"LLMStep '{self.name}' uses grounding but the "
+                                    f"configured LLM client does not support the 'tools' "
+                                    f"parameter.  Use a built-in provider adapter "
+                                    f"(OpenAIClient, AnthropicClient, GoogleClient) or "
+                                    f"update your custom client's complete() signature.",
+                                    step_name=self.name,
+                                )
+                            raise
 
                         content = response.content
                         parsed = json.loads(content)
@@ -353,6 +395,13 @@ class LLMStep:
 
                         # Apply default enforcement
                         values = self._apply_defaults(values)
+
+                        # Inject __sources from citations (if grounding produced any)
+                        if response.citations:
+                            values["__sources"] = [
+                                {"url": c.url, "title": c.title, "snippet": c.snippet}
+                                for c in response.citations
+                            ]
 
                         return StepResult(
                             values=values,
@@ -414,6 +463,27 @@ class LLMStep:
             f"Check your API key, rate limits, and model availability.",
             step_name=self.name,
         )
+
+
+def _normalize_grounding(
+    grounding: bool | dict | GroundingConfig | None,
+) -> GroundingConfig | None:
+    """Normalize the ``grounding`` constructor argument.
+
+    ``True`` → ``GroundingConfig()``; ``dict`` → validated; ``None``/``False`` → ``None``.
+    """
+    if grounding is None or grounding is False:
+        return None
+    if grounding is True:
+        return GroundingConfig()
+    if isinstance(grounding, GroundingConfig):
+        return grounding
+    if isinstance(grounding, dict):
+        return GroundingConfig.model_validate(grounding)
+    raise PipelineError(
+        f"Invalid grounding value: {grounding!r}. "
+        f"Expected True, False, None, dict, or GroundingConfig."
+    )
 
 
 def _is_refusal(value: Any) -> bool:
