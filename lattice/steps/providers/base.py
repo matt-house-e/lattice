@@ -6,14 +6,22 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol, runtime_checkable
 
 from ...schemas.base import UsageInfo
+from ...schemas.grounding import Citation
 
 
 @dataclass
 class LLMResponse:
-    """Response from an LLM provider."""
+    """Response from an LLM provider.
+
+    Attributes:
+        content: The text content of the response.
+        usage: Token usage information.
+        citations: Normalised source citations when grounding tools were used.
+    """
 
     content: str
     usage: Optional[UsageInfo] = None
+    citations: list[Citation] = field(default_factory=list)
 
 
 class LLMAPIError(Exception):
@@ -48,4 +56,5 @@ class LLMClient(Protocol):
         temperature: float,
         max_tokens: int,
         response_format: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> LLMResponse: ...
