@@ -1,6 +1,6 @@
 # Pipeline Architecture Design
 
-> **Status**: Phases 1-5 COMPLETE. Phase 6A (Ship) next.
+> **Status**: Phases 1-5 COMPLETE. Phase 6B conditional steps (#40) COMPLETE. Phase 6A (Ship) next.
 > **Version**: v0.5
 > **Date**: February 2026
 
@@ -98,6 +98,8 @@ class LLMStep:
         client: LLMClient = None,     # Phase 2: any LLMClient protocol adapter
         schema: Type[BaseModel] = EnrichmentResult,
         max_retries: int = 2,
+        run_if: Callable = None,      # Phase 6B: (row, prior_results) -> bool
+        skip_if: Callable = None,     # Phase 6B: (row, prior_results) -> bool
     ): ...
 
     async def run(self, ctx: StepContext) -> StepResult: ...
@@ -164,6 +166,8 @@ class FunctionStep:
         depends_on: list[str] = None,
         cache: bool = True,             # Phase 4: per-step cache bypass
         cache_version: str = None,      # Phase 4: version-based invalidation
+        run_if: Callable = None,        # Phase 6B: (row, prior_results) -> bool
+        skip_if: Callable = None,       # Phase 6B: (row, prior_results) -> bool
     ): ...
 ```
 
@@ -172,6 +176,7 @@ class FunctionStep:
 - The escape hatch for any data source: APIs, databases, custom logic
 - `cache_version` — user bumps version string when function logic changes; auto-invalidates cache
 - `cache=False` — disables caching for non-deterministic functions
+- `run_if` / `skip_if` — per-row predicates for conditional execution (Phase 6B)
 
 ### LLMClient Protocol (`lattice/steps/providers/base.py`) — Phase 2
 
@@ -737,9 +742,14 @@ Minimum viable distribution. Get Lattice into users' hands.
 - **PyPI publish** — `pip install lattice-enrichment`
 - **#21 docs fix** — Update github-standards.md for v0.3 components (quick win)
 
-## Phase 6B: Power User Features
+## Phase 6B: Power User Features — IN PROGRESS
 
-- **Conditional step execution** — `run_if`/`skip_if` on steps
+### What was built
+
+1. **Conditional step execution (#40)** — `run_if`/`skip_if` predicates on `LLMStep` and `FunctionStep`. Predicate signature: `(row: dict, prior_results: dict) -> bool`. Mutually exclusive (validated at construction, raises `PipelineError`). Evaluated per-row in `_execute_step()` before cache check — skipped rows never hit cache or call `step.run()`. Skipped rows produce field spec `default` where available, else `None`. `RowCompleteEvent.skipped` flag (backward-compatible `False` default). `StepUsage.rows_skipped` counter. Sync + async predicates via `inspect.isawaitable()`. Predicate exceptions treated as row errors. Step protocol unchanged — attributes read via `getattr()`.
+
+### Remaining
+
 - **Waterfall enrichment pattern** — Utility for try-source-A, fall-back-to-B
 - **Intra-batch deduplication** — Deduplicate identical rows before API call
 - **Chunked execution** — `chunk_size=N` for memory-bounded processing
@@ -786,3 +796,4 @@ Minimum viable distribution. Get Lattice into users' hands.
 | Structured outputs auto-detect | Feb 2026 | On for native OpenAI + dict fields, off for base_url/non-OpenAI/custom schema/list fields. Overridable. |
 | `system_prompt_header` as Tier 2 | Feb 2026 | Injects `# Context` between Role and Keys. Ignored when full `system_prompt` override is set. Part of cache key. |
 | `web_search()` factory pattern | Feb 2026 | Returns async callable for FunctionStep. Not a step type. Graceful degradation on errors. |
+| `run_if`/`skip_if` predicates on steps | Feb 2026 | Per-row conditional execution. `(row, prior_results) -> bool` signature for lambda friendliness. Mutually exclusive. Evaluated before cache check. Skipped rows use field defaults. No cache entries for skips. |

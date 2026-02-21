@@ -33,6 +33,7 @@ NOT row-oriented (that was v0.2). Each step runs across ALL rows before the next
 - **Structured outputs (OpenAI)**: Auto-enabled for native OpenAI with dict fields. `json_schema` + `strict: true` constrains token generation. Dynamic Pydantic model from field specs. Off for `base_url`, non-OpenAI, custom schema, list fields. Overridable: `structured_outputs=True/False`.
 - **`system_prompt_header`**: Tier 2 prompt customization. Injects `# Context` section between Role and Field Specification Keys. Ignored when `system_prompt` (Tier 3) is set.
 - **`web_search()` utility**: Factory wrapping OpenAI Responses API. Returns async callable for FunctionStep. Template queries with `{field}` placeholders. Graceful degradation on API errors.
+- **Conditional step execution (`run_if`/`skip_if`)**: Per-row predicates on LLMStep and FunctionStep. Signature: `(row: dict, prior_results: dict) -> bool`. Mutually exclusive (validated at construction). Evaluated before cache check — skipped rows never hit cache or `step.run()`. Skipped rows get field spec `default` where available, else `None`. `RowCompleteEvent.skipped` flag + `StepUsage.rows_skipped` counter. Sync + async predicates supported.
 - **pandas stays as base dependency**: 77% of data practitioners use pandas. Lattice's users (enrichment workflows, Jupyter, CSV origins) are pandas users. No native Polars support — `list[dict]` covers the gap. Revisit post-launch.
 
 ### Public API
@@ -71,6 +72,11 @@ LLMStep("analyze", fields={...}, model="gemini-2.5-flash", client=GoogleClient()
 
 # OpenAI-compatible (Ollama, Groq, DeepSeek, etc.): base_url shortcut
 LLMStep("analyze", fields={...}, model="llama3", base_url="http://localhost:11434/v1")
+
+# Conditional step execution: only run for matching rows
+FunctionStep("enrich", fn=enrich_fn, fields=["analysis"],
+    depends_on=["classify"],
+    run_if=lambda row, prior: prior.get("tier") == "enterprise")
 ```
 
 ### Package Structure
@@ -97,7 +103,7 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 | 4 | Caching + checkpoint enhancement (#17): SQLite input-hash cache, per-step-per-row, TTL expiry, cache stats, `checkpoint_interval`, `list[dict]` input | COMPLETE |
 | 5 | Quality + Observability + DX: `system_prompt_header` (#34), lifecycle hooks (#30), structured outputs, `web_search()` utility (#35) | COMPLETE |
 | 6A | Ship (#18): Working examples, README rewrite, PyPI publish (`lattice-enrichment`) | NOT STARTED |
-| 6B | Power user features: Conditional steps, waterfall pattern, chunked execution, CLI | NOT STARTED |
+| 6B | Power user features: Conditional steps (#40), waterfall pattern, chunked execution, CLI | IN PROGRESS |
 
 ### Backlog Triage (Feb 2026)
 - **#13 (Eval suite)** — Closed as won't-fix. Conflicts with design principle: evals are user-level, not library-level.

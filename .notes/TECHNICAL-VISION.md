@@ -1,6 +1,6 @@
 # Lattice Technical Vision & Architecture
 
-**Last Updated:** 2026-02-20 (Phase 5 complete)
+**Last Updated:** 2026-02-21 (Phase 6B conditional steps complete)
 
 ---
 
@@ -397,7 +397,7 @@ Lattice is single-process, in-memory (pandas), async. The bottleneck is almost a
 - **>50K-100K rows regularly** — need distributed processing (Spark, Ray, Prefect workers)
 - **Real-time/streaming** — Lattice is batch-only
 - **Multi-machine** — need distributed workers, not single-process asyncio
-- **Complex orchestration** — conditional branching, loops, human-in-the-loop → Prefect/Dagster
+- **Complex orchestration** — loops, human-in-the-loop → Prefect/Dagster (note: basic conditional branching is now supported via `run_if`/`skip_if`)
 - **Data exceeds memory** — >10GB DataFrames → Dask/Polars/Spark
 
 This is intentional positioning: Lattice fills the gap between Instructor (single LLM call, 1-100 rows) and enterprise data infrastructure (Spark/Prefect/Airflow, 100K+ rows). Caching + checkpointing make the 1K-50K range viable for iterative development.

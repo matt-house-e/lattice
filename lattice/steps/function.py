@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Callable
 
+from ..core.exceptions import PipelineError
 from .base import StepContext, StepResult
 
 
@@ -26,6 +27,8 @@ class FunctionStep:
         depends_on: list[str] | None = None,
         cache: bool = True,
         cache_version: str | None = None,
+        run_if: Callable[..., Any] | None = None,
+        skip_if: Callable[..., Any] | None = None,
     ):
         """Configure a function-based pipeline step.
 
@@ -40,13 +43,26 @@ class FunctionStep:
             cache: Enable input-hash caching for this step (default True).
             cache_version: Bump to invalidate cached results when the
                 function logic changes (e.g. ``"v2"``).
+            run_if: Predicate ``(row, prior_results) -> bool``.  When set,
+                the step only runs for rows where the predicate returns True.
+                Mutually exclusive with ``skip_if``.
+            skip_if: Predicate ``(row, prior_results) -> bool``.  When set,
+                the step is skipped for rows where the predicate returns True.
+                Mutually exclusive with ``run_if``.
         """
+        if run_if is not None and skip_if is not None:
+            raise PipelineError(
+                f"Step '{name}' has both run_if and skip_if set. "
+                f"These are mutually exclusive — use one or the other."
+            )
         self.name = name
         self.fn = fn
         self.fields = fields
         self.depends_on = depends_on or []
         self.cache = cache
         self.cache_version = cache_version
+        self.run_if = run_if
+        self.skip_if = skip_if
         self._is_async = asyncio.iscoroutinefunction(fn)
 
     async def run(self, ctx: StepContext) -> StepResult:
