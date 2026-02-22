@@ -53,6 +53,14 @@ class TestGroundingConfig:
         cfg = GroundingConfig.model_validate({"allowed_domains": ["example.com"]})
         assert cfg.allowed_domains == ["example.com"]
 
+    def test_provider_kwargs_accepted(self):
+        cfg = GroundingConfig(provider_kwargs={"search_context_size": "high"})
+        assert cfg.provider_kwargs == {"search_context_size": "high"}
+
+    def test_provider_kwargs_default_none(self):
+        cfg = GroundingConfig()
+        assert cfg.provider_kwargs is None
+
 
 class TestCitation:
     def test_defaults(self):
@@ -138,6 +146,18 @@ class TestBuildToolsConfig:
         assert tool["blocked_domains"] == ["b.com"]
         assert tool["user_location"] == {"country": "GB"}
         assert tool["max_searches"] == 2
+
+    def test_provider_kwargs_in_tools(self):
+        step = LLMStep("s", fields=["f1"], grounding={
+            "provider_kwargs": {"search_context_size": "high"},
+        })
+        tools = step._build_tools_config()
+        assert tools[0]["provider_kwargs"] == {"search_context_size": "high"}
+
+    def test_provider_kwargs_absent_when_none(self):
+        step = LLMStep("s", fields=["f1"], grounding=True)
+        tools = step._build_tools_config()
+        assert "provider_kwargs" not in tools[0]
 
 
 # ============================================================================
@@ -298,6 +318,19 @@ class TestCacheKeyGrounding:
 
         assert _compute_step_cache_key(step1, row, prior, fields) == \
                _compute_step_cache_key(step2, row, prior, fields)
+
+    def test_provider_kwargs_changes_cache_key(self):
+        """Different provider_kwargs produce different cache keys."""
+        step_none = self._make_step(grounding=True)
+        step_pk = self._make_step(grounding={"provider_kwargs": {"search_context_size": "high"}})
+
+        row = {"a": 1}
+        prior = {}
+        fields = {"f1": {}}
+
+        key_none = _compute_step_cache_key(step_none, row, prior, fields)
+        key_pk = _compute_step_cache_key(step_pk, row, prior, fields)
+        assert key_none != key_pk
 
 
 # ============================================================================

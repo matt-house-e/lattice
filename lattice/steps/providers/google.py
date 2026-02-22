@@ -154,6 +154,9 @@ def _translate_tools(tools: list[dict[str, Any]], types: Any) -> list[Any]:
                     "GoogleClient: allowed_domains is not supported by Google Search. "
                     "The parameter will be ignored."
                 )
+            # Merge provider-specific kwargs (pass-through)
+            if "provider_kwargs" in tool:
+                gs_kwargs.update(tool["provider_kwargs"])
             gemini_tools.append(
                 types.Tool(google_search=types.GoogleSearch(**gs_kwargs))
             )

@@ -203,6 +203,47 @@ class TestOpenAIClientResponses:
         assert result.citations[0].title == "Example"
 
     @pytest.mark.asyncio
+    async def test_provider_kwargs_merged_at_top_level(self):
+        """provider_kwargs are merged into the tool dict at top level and the key is stripped."""
+        mock_response = SimpleNamespace(
+            output_text='{"summary": "test"}',
+            output=[
+                SimpleNamespace(
+                    type="message",
+                    content=[
+                        SimpleNamespace(
+                            type="output_text",
+                            text='{"summary": "test"}',
+                            annotations=[],
+                        )
+                    ],
+                )
+            ],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
+        )
+        mock_inner = MagicMock()
+        mock_inner.responses.create = AsyncMock(return_value=mock_response)
+
+        client = OpenAIClient(api_key="test")
+        client._client = mock_inner
+
+        await client.complete(
+            messages=[{"role": "user", "content": "hi"}],
+            model="gpt-4.1-mini",
+            temperature=0.2,
+            max_tokens=1000,
+            tools=[{
+                "type": "web_search",
+                "provider_kwargs": {"search_context_size": "high"},
+            }],
+        )
+
+        call_kwargs = mock_inner.responses.create.call_args.kwargs
+        tool = call_kwargs["tools"][0]
+        assert tool["search_context_size"] == "high"
+        assert "provider_kwargs" not in tool
+
+    @pytest.mark.asyncio
     async def test_rate_limit_raises_llm_api_error(self):
         from openai import RateLimitError
 
@@ -514,6 +555,38 @@ class TestAnthropicClient:
         assert tool["max_uses"] == 3
 
     @pytest.mark.asyncio
+    async def test_provider_kwargs_merged_into_server_tool(self):
+        """provider_kwargs are merged into the Anthropic server tool dict."""
+        self._install_mock_anthropic()
+        from lattice.steps.providers.anthropic import AnthropicClient
+
+        mock_response = SimpleNamespace(
+            content=[SimpleNamespace(text='{"f1": "val"}', type="text", citations=None)],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+        )
+        mock_inner = MagicMock()
+        mock_inner.messages.create = AsyncMock(return_value=mock_response)
+
+        client = AnthropicClient(api_key="test")
+        client._client = mock_inner
+
+        await client.complete(
+            messages=[{"role": "user", "content": "hi"}],
+            model="claude-sonnet-4-5-20250929",
+            temperature=0.2,
+            max_tokens=1000,
+            tools=[{
+                "type": "web_search",
+                "provider_kwargs": {"custom_param": "value"},
+            }],
+        )
+
+        call_kwargs = mock_inner.messages.create.call_args.kwargs
+        tool = call_kwargs["tools"][0]
+        assert tool["custom_param"] == "value"
+        assert "provider_kwargs" not in tool
+
+    @pytest.mark.asyncio
     async def test_citation_extraction(self):
         """Citations are extracted from web_search_result_location blocks."""
         self._install_mock_anthropic()
@@ -779,6 +852,46 @@ class TestGoogleClient:
         assert result.citations[0].url == "https://example.com/ai"
         assert result.citations[0].title == "AI News"
         assert result.citations[1].url == "https://other.com/tech"
+
+    @pytest.mark.asyncio
+    async def test_provider_kwargs_merged_into_google_search(self):
+        """provider_kwargs are merged into GoogleSearch kwargs."""
+        self._install_mock_google()
+        from lattice.steps.providers.google import GoogleClient
+
+        mock_response = SimpleNamespace(
+            text='{}',
+            candidates=None,
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=10, candidates_token_count=5,
+            ),
+        )
+        mock_client = MagicMock()
+        mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+        client = GoogleClient(api_key="test")
+        client._client = mock_client
+
+        await client.complete(
+            messages=[{"role": "user", "content": "hi"}],
+            model="gemini-2.5-flash",
+            temperature=0.2,
+            max_tokens=1000,
+            tools=[{
+                "type": "web_search",
+                "provider_kwargs": {"dynamic_retrieval_config": {"mode": "dynamic"}},
+            }],
+        )
+
+        call_args = mock_client.aio.models.generate_content.call_args
+        config = call_args.kwargs["config"]
+        # The tool was created with GoogleSearch(**gs_kwargs) where gs_kwargs includes
+        # the provider_kwargs merged in. Verify the tool is present.
+        assert "tools" in config
+        tool = config["tools"][0]
+        # GoogleSearch mock captures kwargs: {"google_search": True, ...}
+        gs = tool.get("google_search", {})
+        assert gs.get("dynamic_retrieval_config") == {"mode": "dynamic"}
 
     @pytest.mark.asyncio
     async def test_allowed_domains_warns(self, caplog):

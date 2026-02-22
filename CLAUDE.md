@@ -34,7 +34,7 @@ NOT row-oriented (that was v0.2). Each step runs across ALL rows before the next
 - **`system_prompt_header`**: Tier 2 prompt customization. Injects `# Context` section between Role and Field Specification Keys. Ignored when `system_prompt` (Tier 3) is set.
 - **`web_search()` utility**: Factory wrapping OpenAI Responses API. Returns async callable for FunctionStep. Template queries with `{field}` placeholders. Graceful degradation on API errors.
 - **Conditional step execution (`run_if`/`skip_if`)**: Per-row predicates on LLMStep and FunctionStep. Signature: `(row: dict, prior_results: dict) -> bool`. Mutually exclusive (validated at construction). Evaluated before cache check — skipped rows never hit cache or `step.run()`. Skipped rows get field spec `default` where available, else `None`. `RowCompleteEvent.skipped` flag + `StepUsage.rows_skipped` counter. Sync + async predicates supported.
-- **Provider-level grounding (`grounding`)**: `LLMStep(..., grounding=True)` enables native web search via each provider's server-side tool. `GroundingConfig` (Pydantic, `extra="forbid"`) supports `allowed_domains`, `blocked_domains`, `user_location`, `max_searches`. Each adapter translates to native format: OpenAI `web_search` (Responses API), Anthropic `web_search_20250305`, Google `google_search`. Citations normalised to `Citation(url, title, snippet)` on `LLMResponse.citations`, auto-injected as `__sources` (internal field). Cache key includes grounding config hash. Structured outputs disabled when grounding active for Anthropic/Google (incompatible); OpenAI supports both via `text.format`.
+- **Provider-level grounding (`grounding`)**: `LLMStep(..., grounding=True)` enables native web search via each provider's server-side tool. `GroundingConfig` (Pydantic, `extra="forbid"`) supports `allowed_domains`, `blocked_domains`, `user_location`, `max_searches`, `provider_kwargs`. The first four are cross-provider fields mapped by each adapter; `provider_kwargs` is a `Dict[str, Any]` escape hatch merged into the native tool config for provider-specific options (e.g. OpenAI `search_context_size`, Google `dynamic_retrieval_config`). Each adapter translates to native format: OpenAI `web_search` (Responses API), Anthropic `web_search_20250305`, Google `google_search`. Citations normalised to `Citation(url, title, snippet)` on `LLMResponse.citations`, auto-injected as `__sources` (internal field). Cache key includes grounding config hash. Structured outputs disabled when grounding active for Anthropic/Google (incompatible); OpenAI supports both via `text.format`.
 - **OpenAI adapter uses Responses API**: Native OpenAI (no `base_url`) uses `client.responses.create()` — OpenAI's recommended path. Supports `text.format` for structured outputs, native `web_search` tool, inline `url_citation` annotations. `base_url` providers (Ollama, Groq, etc.) fall back to Chat Completions for compatibility.
 - **pandas stays as base dependency**: 77% of data practitioners use pandas. Lattice's users (enrichment workflows, Jupyter, CSV origins) are pandas users. No native Polars support — `list[dict]` covers the gap. Revisit post-launch.
 
@@ -95,6 +95,11 @@ LLMStep("research", fields={"summary": "Summarize recent news"}, grounding={
 from lattice import GroundingConfig
 LLMStep("research", fields={...}, grounding=True, client=AnthropicClient(), model="claude-sonnet-4-5-20250929")
 LLMStep("research", fields={...}, grounding=True, client=GoogleClient(), model="gemini-2.5-flash")
+
+# Provider-specific options via provider_kwargs
+LLMStep("research", fields={...}, grounding={
+    "provider_kwargs": {"search_context_size": "high"},  # OpenAI-specific
+})
 ```
 
 ### Package Structure

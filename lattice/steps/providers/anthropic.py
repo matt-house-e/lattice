@@ -147,6 +147,9 @@ def _translate_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 server_tool["user_location"] = {"type": "approximate", **loc}
             if "max_searches" in tool:
                 server_tool["max_uses"] = tool["max_searches"]
+            # Merge provider-specific kwargs (pass-through)
+            if "provider_kwargs" in tool:
+                server_tool.update(tool["provider_kwargs"])
             anthropic_tools.append(server_tool)
     return anthropic_tools
 

@@ -104,7 +104,7 @@ class OpenAIClient:
 
         # Tools (e.g. web_search)
         if tools:
-            kwargs["tools"] = tools
+            kwargs["tools"] = _merge_provider_kwargs(tools)
 
         try:
             response = await client.responses.create(**kwargs)
@@ -238,6 +238,24 @@ def _translate_response_format(response_format: dict[str, Any]) -> dict[str, Any
     if fmt_type == "json_object":
         return {"type": "json_object"}
     return {"type": "text"}
+
+
+def _merge_provider_kwargs(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge ``provider_kwargs`` into each tool dict and strip the key.
+
+    OpenAI accepts provider-specific options (e.g. ``search_context_size``)
+    as top-level keys on the tool dict.  ``provider_kwargs`` from
+    :class:`GroundingConfig` are merged at the top level so they reach the
+    API directly.
+    """
+    merged: list[dict[str, Any]] = []
+    for tool in tools:
+        out = dict(tool)
+        pk = out.pop("provider_kwargs", None)
+        if pk:
+            out.update(pk)
+        merged.append(out)
+    return merged
 
 
 def _extract_citations(response: Any) -> list[Citation]:

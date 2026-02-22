@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -31,14 +31,20 @@ class GroundingConfig(BaseModel):
             Keys: ``country`` (ISO 3166-1 alpha-2), ``region``, ``city``,
             ``timezone`` (IANA).
         max_searches: Maximum number of searches per LLM call.
+        provider_kwargs: Provider-specific keyword arguments passed through
+            to the native tool configuration.  Useful for options that only
+            one provider supports (e.g. OpenAI ``search_context_size``,
+            Google ``dynamic_retrieval_config``).  These are merged into the
+            provider's tool dict after Lattice's own field mappings.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    allowed_domains: Optional[List[str]] = None
-    blocked_domains: Optional[List[str]] = None
-    user_location: Optional[Dict[str, str]] = None
-    max_searches: Optional[int] = None
+    allowed_domains: list[str] | None = None
+    blocked_domains: list[str] | None = None
+    user_location: dict[str, str] | None = None
+    max_searches: int | None = None
+    provider_kwargs: dict[str, Any] | None = None
 
 
 @dataclass

@@ -135,7 +135,9 @@ class LLMStep:
                 ``True`` enables with defaults, a ``dict`` or
                 :class:`GroundingConfig` allows fine-grained control
                 (``allowed_domains``, ``blocked_domains``, ``user_location``,
-                ``max_searches``).  ``None`` or ``False`` disables.
+                ``max_searches``, ``provider_kwargs``).  ``None`` or ``False``
+                disables.  Use ``provider_kwargs`` to pass provider-specific
+                options (e.g. ``{"search_context_size": "high"}`` for OpenAI).
             run_if: Predicate ``(row, prior_results) -> bool``.  When set,
                 the step only runs for rows where the predicate returns True.
                 Mutually exclusive with ``skip_if``.
@@ -288,6 +290,8 @@ class LLMStep:
             tool["user_location"] = cfg.user_location
         if cfg.max_searches is not None:
             tool["max_searches"] = cfg.max_searches
+        if cfg.provider_kwargs:
+            tool["provider_kwargs"] = cfg.provider_kwargs
         return [tool]
 
     # -- default enforcement ---------------------------------------------

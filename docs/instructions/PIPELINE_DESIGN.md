@@ -275,6 +275,18 @@ Pipeline([
 
 `__web_context` is internal (filtered from output). `sources` is visible — users get citation URLs per row. The LLMStep sees web context in `prior_results` via `depends_on`.
 
+### Grounding vs `web_search()` — When to Use Each
+
+| | `grounding=True` | `web_search()` + FunctionStep |
+|---|---|---|
+| **Steps** | 1 | 2 |
+| **Query control** | Model decides | You template with `{field}` |
+| **Providers** | OpenAI, Anthropic, Google | OpenAI only |
+| **Structured outputs** | OpenAI: yes. Anthropic/Google: json_object fallback | Full (search is a separate step) |
+| **Citations** | `__sources` (internal, available in `prior_results`) | Explicit `sources` field in output |
+| **Provider tuning** | `provider_kwargs` on GroundingConfig | Full control (you write the API call) |
+| **Best for** | Simple grounded enrichment, multi-provider | Complex queries, multi-query, need full control |
+
 ## Primary API: Pipeline.run()
 
 **Phase 2 redesign:** Pipeline becomes the primary public interface. Enricher becomes an internal runner.
