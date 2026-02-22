@@ -1,8 +1,10 @@
-# Lattice - Enrichment Pipeline Engine
+# Accrue - Enrichment Pipeline Engine
 
-## What Lattice Is
+> **Rename in progress:** The library is being renamed from Lattice to Accrue (see ADR 013, GitHub Epic #57). Code still uses `lattice/` imports until the rename epic is completed.
 
-A programmatic enrichment engine. The gap between Instructor (single LLM call) and Clay (full SaaS platform). Users define a pipeline of composable steps, point it at a DataFrame, and get structured results. Lattice handles orchestration: column-oriented batching, step dependencies, Pydantic validation, retries, checkpointing, and async concurrency.
+## What Accrue Is
+
+A programmatic enrichment engine. The gap between Instructor (single LLM call) and Clay (full SaaS platform). Users define a pipeline of composable steps, point it at a DataFrame, and get structured results. Accrue handles orchestration: column-oriented batching, step dependencies, Pydantic validation, retries, checkpointing, and async concurrency.
 
 ## Architecture (v0.5)
 
@@ -17,7 +19,7 @@ NOT row-oriented (that was v0.2). Each step runs across ALL rows before the next
 
 ### Key Design Decisions
 
-- **Pipeline is the primary API**: `pipeline.run(df)` is the ONE way to use Lattice. No Enricher in the public API — it's an internal runner.
+- **Pipeline is the primary API**: `pipeline.run(df)` is the ONE way to use Accrue. No Enricher in the public API — it's an internal runner.
 - **Fields live on steps**: LLMStep accepts inline field specs. No separate field definition file required. Field spec keys: `prompt`, `type`, `format`, `enum`, `examples`, `bad_examples`, `default` (all optional except `prompt`).
 - **Step protocol**: Async-only `run()` method. No sync/async duplication.
 - **Provider-agnostic via LLMClient protocol**: OpenAI is the default (zero config). Anthropic and Google ship as optional extras (`pip install lattice[anthropic]`, `lattice[google]`). Any provider works via the `LLMClient` protocol (~30-line adapter). No litellm, no LangChain.
@@ -25,7 +27,7 @@ NOT row-oriented (that was v0.2). Each step runs across ALL rows before the next
 - **Step data**: `dict[str, Any]` not `pd.Series`. Steps are pure, no pandas.
 - **Internal fields**: `__` prefix (e.g. `__web_context`) for inter-step data, filtered from output.
 - **Lifecycle hooks**: `EnrichmentHooks` with 5 typed callbacks (pipeline start/end, step start/end, row complete). Passed to `run()`/`run_async()`. Sync + async hooks supported. Hook errors caught + logged, never crash pipelines.
-- **No eval tooling**: Lattice exposes data (cost, errors, usage). Users run their own evals. Lifecycle hooks let observability tools plug in without being dependencies.
+- **No eval tooling**: Accrue exposes data (cost, errors, usage). Users run their own evals. Lifecycle hooks let observability tools plug in without being dependencies.
 - **Minimal dependencies**: Base install: `openai`, `pydantic`, `pandas`, `tqdm`, `python-dotenv`. Optional: `anthropic`, `google-genai`. Never add heavy transitive deps (no litellm, no langfuse).
 - **Caching via SQLite (`sqlite3` stdlib)**: Input-hash per-step-per-row cache. Cache key includes step name, row data, prior results, field specs, model, and temperature — changing a prompt auto-invalidates. WAL mode for concurrent access. `cache=False` per-step bypass. `FunctionStep(..., cache_version="v1")` for function caching. Cache stats flow into `PipelineResult.cost`.
 - **Checkpoint + cache are separate concerns**: Checkpoint = step-level crash recovery (fast single-file resume). Cache = row-level input-hash deduplication (across runs). `checkpoint_interval=100` saves partial step progress every N rows for large datasets.
@@ -36,7 +38,7 @@ NOT row-oriented (that was v0.2). Each step runs across ALL rows before the next
 - **Conditional step execution (`run_if`/`skip_if`)**: Per-row predicates on LLMStep and FunctionStep. Signature: `(row: dict, prior_results: dict) -> bool`. Mutually exclusive (validated at construction). Evaluated before cache check — skipped rows never hit cache or `step.run()`. Skipped rows get field spec `default` where available, else `None`. `RowCompleteEvent.skipped` flag + `StepUsage.rows_skipped` counter. Sync + async predicates supported.
 - **Provider-level grounding (`grounding`)**: `LLMStep(..., grounding=True)` enables native web search via each provider's server-side tool. `GroundingConfig` (Pydantic, `extra="forbid"`) supports `allowed_domains`, `blocked_domains`, `user_location`, `max_searches`, `provider_kwargs`. The first four are cross-provider fields mapped by each adapter; `provider_kwargs` is a `Dict[str, Any]` escape hatch merged into the native tool config for provider-specific options (e.g. OpenAI `search_context_size`, Google `dynamic_retrieval_config`). Each adapter translates to native format: OpenAI `web_search` (Responses API), Anthropic `web_search_20250305`, Google `google_search`. Citations normalised to `Citation(url, title, snippet)` on `LLMResponse.citations`, auto-injected as `__sources` (internal field). Cache key includes grounding config hash. Structured outputs disabled when grounding active for Anthropic/Google (incompatible); OpenAI supports both via `text.format`.
 - **OpenAI adapter uses Responses API**: Native OpenAI (no `base_url`) uses `client.responses.create()` — OpenAI's recommended path. Supports `text.format` for structured outputs, native `web_search` tool, inline `url_citation` annotations. `base_url` providers (Ollama, Groq, etc.) fall back to Chat Completions for compatibility.
-- **pandas stays as base dependency**: 77% of data practitioners use pandas. Lattice's users (enrichment workflows, Jupyter, CSV origins) are pandas users. No native Polars support — `list[dict]` covers the gap. Revisit post-launch.
+- **pandas stays as base dependency**: 77% of data practitioners use pandas. Accrue's users (enrichment workflows, Jupyter, CSV origins) are pandas users. No native Polars support — `list[dict]` covers the gap. Revisit post-launch.
 
 ### Public API
 
@@ -125,13 +127,13 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 | 3 | Field spec + dynamic prompt (#33): 7-key field spec validation, dynamic prompt builder (markdown+XML), `default` enforcement, model default → gpt-4.1-mini, CSV loader update | COMPLETE |
 | 4 | Caching + checkpoint enhancement (#17): SQLite input-hash cache, per-step-per-row, TTL expiry, cache stats, `checkpoint_interval`, `list[dict]` input | COMPLETE |
 | 5 | Quality + Observability + DX: `system_prompt_header` (#34), lifecycle hooks (#30), structured outputs, `web_search()` utility (#35) | COMPLETE |
-| 6A | Ship (#18): Working examples, README rewrite, PyPI publish (`lattice-enrichment`) | NOT STARTED |
+| 6A | Ship (#18): Working examples, README rewrite, PyPI publish (`accrue`) | NOT STARTED |
 | 6B | Power user features: Conditional steps (#40), provider grounding (#48), waterfall pattern, chunked execution, CLI | IN PROGRESS |
 
 ### Backlog Triage (Feb 2026)
 - **#13 (Eval suite)** — Closed as won't-fix. Conflicts with design principle: evals are user-level, not library-level.
 - **#11 (Streaming)** — Closed. Subsumed by lifecycle hooks (`on_row_complete`).
-- **#12 (Provenance)** — Kept, deprioritized. Partially addressed by web search two-step pattern. Post-launch differentiator.
+- **#12 (Provenance)** — Closed. Superseded by provider-level grounding (#48): `Citation`, `sources_field`, normalized across providers.
 
 ## Design Principles
 
@@ -139,7 +141,7 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 - **Fields live on steps.** LLMStep declares what it produces AND how. 7 field spec keys: `prompt` (required), `type`, `format`, `enum`, `examples`, `bad_examples`, `default`. No separate field registry.
 - **No unnecessary dependencies.** Base install is 5 deps. Anthropic/Google are optional extras. Never add litellm, langfuse, or other heavy transitive deps.
 - **FunctionStep is the escape hatch.** Any external data source is a FunctionStep. No built-in provider steps.
-- **Evals are user-level, not library-level.** Lattice exposes inputs, outputs, cost, and errors. Users evaluate correctness in their own domain.
+- **Evals are user-level, not library-level.** Accrue exposes inputs, outputs, cost, and errors. Users evaluate correctness in their own domain.
 - **CSV is a utility, not a dependency.** `load_fields()` loads prompts from CSV for teams where non-devs manage fields. It's not in the core path.
 - **Prompt engineering follows OpenAI cookbook.** Markdown headers for sections, XML tags for data boundaries. Dynamic prompt builder only includes keys actually used across fields. JSON in prompts is avoided (performs poorly per OpenAI's testing).
 
@@ -152,7 +154,7 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 
 ## Scale Limits & Sweet Spot
 
-**Lattice's sweet spot: 100 to 50,000 rows.** Primary use case: 1,000-10,000 rows. This is the "too many for manual/Instructor, too few to justify big data infrastructure" zone.
+**Accrue's sweet spot: 100 to 50,000 rows.** Primary use case: 1,000-10,000 rows. This is the "too many for manual/Instructor, too few to justify big data infrastructure" zone.
 
 | Rows | Memory | Time (3 steps, 10 workers) | Cost (gpt-4.1-mini) | Verdict |
 |------|--------|---------------------------|---------------------|---------|
@@ -161,16 +163,16 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 | 10,000 | ~100-500MB | ~50 min | ~$20 | Core use case, caching essential |
 | 50,000 | ~500MB-2GB | ~4 hours (50 workers: ~50 min) | ~$100 | Upper bound, needs Tier 2+ rate limits |
 | 100,000 | ~1-5GB | ~8 hours (200 workers: ~25 min) | ~$200 | Feasible but pushing it |
-| 1,000,000 | ~10-50GB | Prohibitive single-process | ~$2,000 | Outgrown Lattice |
+| 1,000,000 | ~10-50GB | Prohibitive single-process | ~$2,000 | Outgrown Accrue |
 
-**When users outgrow Lattice:**
+**When users outgrow Accrue:**
 - **>50K-100K rows regularly**: Time is prohibitive without distributed processing (Spark, Ray, Prefect workers)
-- **Real-time/streaming enrichment**: Lattice is batch-only — process arrives, wait for pipeline to finish
+- **Real-time/streaming enrichment**: Accrue is batch-only — process arrives, wait for pipeline to finish
 - **Multi-machine parallelism**: Need distributed workers, not single-process asyncio
 - **Complex orchestration**: Conditional branching, loops, human-in-the-loop → Prefect/Dagster/Airflow
 - **Data exceeds memory**: >10GB DataFrames → Dask, Polars lazy evaluation, Spark
 
-**Lattice's constraints are single-process and in-memory pandas.** The bottleneck is almost always API rate limits and cost, not Lattice itself. With Tier 5 rate limits (200 workers), Lattice can process 50K rows across 3 steps in under an hour.
+**Accrue's constraints are single-process and in-memory pandas.** The bottleneck is almost always API rate limits and cost, not Accrue itself. With Tier 5 rate limits (200 workers), Accrue can process 50K rows across 3 steps in under an hour.
 
 ## Keeping Docs in Sync
 
