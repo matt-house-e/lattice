@@ -86,6 +86,7 @@ class LLMStep:
         cache: bool = True,
         structured_outputs: bool | None = None,
         grounding: bool | dict | GroundingConfig | None = None,
+        sources_field: str | None = "sources",
         run_if: Callable[..., Any] | None = None,
         skip_if: Callable[..., Any] | None = None,
     ):
@@ -138,6 +139,11 @@ class LLMStep:
                 ``max_searches``, ``provider_kwargs``).  ``None`` or ``False``
                 disables.  Use ``provider_kwargs`` to pass provider-specific
                 options (e.g. ``{"search_context_size": "high"}`` for OpenAI).
+            sources_field: Name of the visible output field for grounding
+                citations.  Defaults to ``"sources"``.  Set to ``None`` to
+                disable citation injection entirely.  Silently ignored when
+                grounding is disabled.  Not included in the cache key
+                (changing it does not invalidate cached results).
             run_if: Predicate ``(row, prior_results) -> bool``.  When set,
                 the step only runs for rows where the predicate returns True.
                 Mutually exclusive with ``skip_if``.
@@ -169,6 +175,7 @@ class LLMStep:
 
         # Normalize grounding config: True → GroundingConfig(), dict → validated
         self._grounding_config: GroundingConfig | None = _normalize_grounding(grounding)
+        self.sources_field = sources_field
 
         # Normalize fields: dict → inline FieldSpec objects + field names list
         if isinstance(fields, dict):
@@ -177,6 +184,18 @@ class LLMStep:
         else:
             self._field_specs: dict[str, FieldSpec] = {}
             self.fields = fields
+
+        # Validate sources_field doesn't conflict with declared fields
+        if (
+            self._grounding_config is not None
+            and self.sources_field is not None
+            and self.sources_field in self.fields
+        ):
+            raise PipelineError(
+                f"Step '{name}': sources_field '{self.sources_field}' conflicts "
+                f"with a declared field name. Use sources_field=None to disable "
+                f"citation injection, or choose a different name."
+            )
 
         # Build and cache structured outputs format (field specs are immutable)
         self._response_format = self._build_response_format()
@@ -400,9 +419,9 @@ class LLMStep:
                         # Apply default enforcement
                         values = self._apply_defaults(values)
 
-                        # Inject __sources from citations (if grounding produced any)
-                        if response.citations:
-                            values["__sources"] = [
+                        # Inject citations under sources_field (if grounding produced any)
+                        if response.citations and self.sources_field is not None:
+                            values[self.sources_field] = [
                                 {"url": c.url, "title": c.title, "snippet": c.snippet}
                                 for c in response.citations
                             ]

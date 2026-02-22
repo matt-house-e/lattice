@@ -166,11 +166,11 @@ class TestBuildToolsConfig:
 
 
 class TestLLMStepRunWithGrounding:
-    """Test that run() passes tools to client and injects __sources."""
+    """Test that run() passes tools to client and injects sources."""
 
     @pytest.mark.asyncio
     async def test_tools_passed_and_sources_injected(self):
-        """When grounding is enabled, tools are passed to client and __sources injected."""
+        """When grounding is enabled, tools are passed to client and sources injected."""
         citations = [
             Citation(url="https://example.com", title="Example", snippet="The answer"),
         ]
@@ -199,17 +199,17 @@ class TestLLMStepRunWithGrounding:
         call_kwargs = mock_client.complete.call_args.kwargs
         assert call_kwargs["tools"] == [{"type": "web_search"}]
 
-        # __sources injected
-        assert "__sources" in result.values
-        assert len(result.values["__sources"]) == 1
-        assert result.values["__sources"][0]["url"] == "https://example.com"
+        # sources injected (visible field, default name "sources")
+        assert "sources" in result.values
+        assert len(result.values["sources"]) == 1
+        assert result.values["sources"][0]["url"] == "https://example.com"
 
         # Regular field present
         assert result.values["summary"] == "AI is growing"
 
     @pytest.mark.asyncio
     async def test_no_citations_no_sources(self):
-        """When grounding returns no citations, __sources is NOT injected."""
+        """When grounding returns no citations, sources is NOT injected."""
         mock_response = LLMResponse(
             content='{"summary": "AI is growing"}',
             citations=[],
@@ -231,7 +231,7 @@ class TestLLMStepRunWithGrounding:
         )
         result = await step.run(ctx)
 
-        assert "__sources" not in result.values
+        assert "sources" not in result.values
 
     @pytest.mark.asyncio
     async def test_no_grounding_no_tools(self):
@@ -331,6 +331,109 @@ class TestCacheKeyGrounding:
         key_none = _compute_step_cache_key(step_none, row, prior, fields)
         key_pk = _compute_step_cache_key(step_pk, row, prior, fields)
         assert key_none != key_pk
+
+
+# ============================================================================
+# sources_field customization
+# ============================================================================
+
+
+class TestSourcesField:
+    """Test sources_field param on LLMStep (default, custom name, None, conflict)."""
+
+    def _make_response(self, citations=None):
+        return LLMResponse(
+            content='{"summary": "result"}',
+            citations=citations or [],
+        )
+
+    def _make_ctx(self):
+        return StepContext(
+            row={"topic": "AI"},
+            fields={"summary": {"prompt": "Summarize"}},
+            prior_results={},
+        )
+
+    def test_default_sources_field(self):
+        """Default sources_field is 'sources'."""
+        step = LLMStep("s", fields={"summary": "Summarize"}, grounding=True)
+        assert step.sources_field == "sources"
+
+    def test_custom_sources_field(self):
+        step = LLMStep("s", fields={"summary": "Summarize"}, grounding=True, sources_field="refs")
+        assert step.sources_field == "refs"
+
+    def test_sources_field_none(self):
+        step = LLMStep("s", fields={"summary": "Summarize"}, grounding=True, sources_field=None)
+        assert step.sources_field is None
+
+    def test_sources_field_no_grounding(self):
+        """sources_field is stored but silently ignored when grounding is disabled."""
+        step = LLMStep("s", fields={"summary": "Summarize"}, sources_field="refs")
+        assert step.sources_field == "refs"
+        assert step._grounding_config is None
+
+    def test_conflict_with_declared_field_raises(self):
+        """sources_field matching a declared field name raises PipelineError."""
+        with pytest.raises(PipelineError, match="sources_field 'summary' conflicts"):
+            LLMStep("s", fields={"summary": "Summarize"}, grounding=True, sources_field="summary")
+
+    def test_no_conflict_when_grounding_disabled(self):
+        """No conflict validation when grounding is disabled."""
+        step = LLMStep("s", fields={"sources": "Find sources"}, sources_field="sources")
+        assert step.sources_field == "sources"
+
+    @pytest.mark.asyncio
+    async def test_custom_name_injected(self):
+        """sources_field='refs' injects citations under 'refs' key."""
+        citations = [Citation(url="https://x.com", title="X", snippet="s")]
+        mock_client = AsyncMock()
+        mock_client.complete = AsyncMock(return_value=self._make_response(citations))
+
+        step = LLMStep(
+            "s", fields={"summary": "Summarize"},
+            grounding=True, sources_field="refs", client=mock_client,
+        )
+        result = await step.run(self._make_ctx())
+
+        assert "refs" in result.values
+        assert "sources" not in result.values
+        assert result.values["refs"][0]["url"] == "https://x.com"
+
+    @pytest.mark.asyncio
+    async def test_none_disables_injection(self):
+        """sources_field=None means no citation injection even with citations."""
+        citations = [Citation(url="https://x.com", title="X", snippet="s")]
+        mock_client = AsyncMock()
+        mock_client.complete = AsyncMock(return_value=self._make_response(citations))
+
+        step = LLMStep(
+            "s", fields={"summary": "Summarize"},
+            grounding=True, sources_field=None, client=mock_client,
+        )
+        result = await step.run(self._make_ctx())
+
+        assert "sources" not in result.values
+        assert "refs" not in result.values
+        # Only the declared field
+        assert list(result.values.keys()) == ["summary"]
+
+    @pytest.mark.asyncio
+    async def test_default_sources_visible_in_output(self):
+        """Default 'sources' field is NOT __ prefixed, so it's visible in output."""
+        citations = [Citation(url="https://x.com", title="T", snippet="S")]
+        mock_client = AsyncMock()
+        mock_client.complete = AsyncMock(return_value=self._make_response(citations))
+
+        step = LLMStep(
+            "s", fields={"summary": "Summarize"},
+            grounding=True, client=mock_client,
+        )
+        result = await step.run(self._make_ctx())
+
+        # "sources" doesn't start with __ → visible in pipeline output
+        assert "sources" in result.values
+        assert not result.values["sources"][0]["url"].startswith("__")
 
 
 # ============================================================================

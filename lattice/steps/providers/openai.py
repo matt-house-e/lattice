@@ -8,12 +8,15 @@ when a ``base_url`` is configured.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Optional
 
 from ...schemas.base import UsageInfo
 from ...schemas.grounding import Citation
 from .base import LLMAPIError, LLMResponse
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAIClient:
@@ -104,7 +107,7 @@ class OpenAIClient:
 
         # Tools (e.g. web_search)
         if tools:
-            kwargs["tools"] = _merge_provider_kwargs(tools)
+            kwargs["tools"] = _translate_tools(tools)
 
         try:
             response = await client.responses.create(**kwargs)
@@ -240,22 +243,55 @@ def _translate_response_format(response_format: dict[str, Any]) -> dict[str, Any
     return {"type": "text"}
 
 
-def _merge_provider_kwargs(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Merge ``provider_kwargs`` into each tool dict and strip the key.
+def _translate_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Translate generic grounding tool dicts to OpenAI Responses API format.
 
-    OpenAI accepts provider-specific options (e.g. ``search_context_size``)
-    as top-level keys on the tool dict.  ``provider_kwargs`` from
-    :class:`GroundingConfig` are merged at the top level so they reach the
-    API directly.
+    Maps cross-provider fields from :class:`GroundingConfig` into the native
+    OpenAI ``web_search`` tool structure:
+
+    - ``allowed_domains`` → ``filters.allowed_domains``
+    - ``blocked_domains`` → *unsupported* (logged warning, dropped)
+    - ``user_location``   → ``user_location`` with ``{"type": "approximate", ...}``
+    - ``max_searches``    → *unsupported* (logged warning, dropped)
+    - ``provider_kwargs`` → merged at top level (e.g. ``search_context_size``)
     """
-    merged: list[dict[str, Any]] = []
+    translated: list[dict[str, Any]] = []
     for tool in tools:
         out = dict(tool)
+
+        # -- provider_kwargs: merge at top level -------------------------
         pk = out.pop("provider_kwargs", None)
         if pk:
             out.update(pk)
-        merged.append(out)
-    return merged
+
+        # -- allowed_domains → filters.allowed_domains -------------------
+        allowed = out.pop("allowed_domains", None)
+        if allowed:
+            out.setdefault("filters", {})["allowed_domains"] = allowed
+
+        # -- blocked_domains: not supported by OpenAI --------------------
+        blocked = out.pop("blocked_domains", None)
+        if blocked:
+            logger.warning(
+                "OpenAI web_search does not support blocked_domains; "
+                "this setting will be ignored."
+            )
+
+        # -- user_location → {"type": "approximate", ...} ---------------
+        location = out.pop("user_location", None)
+        if location:
+            out["user_location"] = {"type": "approximate", **location}
+
+        # -- max_searches: not supported by OpenAI -----------------------
+        max_searches = out.pop("max_searches", None)
+        if max_searches is not None:
+            logger.warning(
+                "OpenAI web_search does not support max_searches; "
+                "this setting will be ignored."
+            )
+
+        translated.append(out)
+    return translated
 
 
 def _extract_citations(response: Any) -> list[Citation]:

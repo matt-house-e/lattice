@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -242,6 +243,84 @@ class TestOpenAIClientResponses:
         tool = call_kwargs["tools"][0]
         assert tool["search_context_size"] == "high"
         assert "provider_kwargs" not in tool
+
+    @pytest.mark.asyncio
+    async def test_allowed_domains_nested_under_filters(self):
+        """allowed_domains is translated to filters.allowed_domains for OpenAI."""
+        mock_response = SimpleNamespace(
+            output_text='{"f": "v"}',
+            output=[SimpleNamespace(
+                type="message",
+                content=[SimpleNamespace(type="output_text", text='{"f": "v"}', annotations=[])],
+            )],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
+        )
+        mock_inner = MagicMock()
+        mock_inner.responses.create = AsyncMock(return_value=mock_response)
+
+        client = OpenAIClient(api_key="test")
+        client._client = mock_inner
+
+        await client.complete(
+            messages=[{"role": "user", "content": "hi"}],
+            model="gpt-4.1-mini",
+            temperature=0.2,
+            max_tokens=1000,
+            tools=[{
+                "type": "web_search",
+                "allowed_domains": ["sec.gov", "reuters.com"],
+                "user_location": {"country": "GB", "city": "London"},
+            }],
+        )
+
+        call_kwargs = mock_inner.responses.create.call_args.kwargs
+        tool = call_kwargs["tools"][0]
+        # allowed_domains nested under filters
+        assert tool["filters"] == {"allowed_domains": ["sec.gov", "reuters.com"]}
+        assert "allowed_domains" not in tool
+        # user_location wrapped with {"type": "approximate", ...}
+        assert tool["user_location"] == {
+            "type": "approximate",
+            "country": "GB",
+            "city": "London",
+        }
+
+    @pytest.mark.asyncio
+    async def test_unsupported_fields_warn_and_drop(self, caplog):
+        """blocked_domains and max_searches log warnings and are dropped."""
+        mock_response = SimpleNamespace(
+            output_text='{"f": "v"}',
+            output=[SimpleNamespace(
+                type="message",
+                content=[SimpleNamespace(type="output_text", text='{"f": "v"}', annotations=[])],
+            )],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
+        )
+        mock_inner = MagicMock()
+        mock_inner.responses.create = AsyncMock(return_value=mock_response)
+
+        client = OpenAIClient(api_key="test")
+        client._client = mock_inner
+
+        with caplog.at_level(logging.WARNING):
+            await client.complete(
+                messages=[{"role": "user", "content": "hi"}],
+                model="gpt-4.1-mini",
+                temperature=0.2,
+                max_tokens=1000,
+                tools=[{
+                    "type": "web_search",
+                    "blocked_domains": ["reddit.com"],
+                    "max_searches": 5,
+                }],
+            )
+
+        call_kwargs = mock_inner.responses.create.call_args.kwargs
+        tool = call_kwargs["tools"][0]
+        assert "blocked_domains" not in tool
+        assert "max_searches" not in tool
+        assert "blocked_domains" in caplog.text
+        assert "max_searches" in caplog.text
 
     @pytest.mark.asyncio
     async def test_rate_limit_raises_llm_api_error(self):

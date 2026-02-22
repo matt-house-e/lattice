@@ -52,8 +52,9 @@ class Citation:
     """A normalised source citation from a grounded LLM response.
 
     Provider adapters translate their native citation formats into this
-    common representation.  Lattice injects these as ``__sources`` on the
-    step result (filtered from final output, available in ``prior_results``).
+    common representation.  Lattice injects these under the ``sources_field``
+    name on the step result (default ``"sources"``, visible in output).
+    Set ``sources_field=None`` on LLMStep to disable citation injection.
 
     Attributes:
         url: Source URL.
