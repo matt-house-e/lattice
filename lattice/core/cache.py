@@ -155,6 +155,13 @@ def _compute_step_cache_key(
         # LLMStep path
         system_prompt = getattr(step, "_custom_system_prompt", None) or ""
         system_prompt_header = getattr(step, "_system_prompt_header", None) or ""
+        # Include grounding config in cache key when present
+        grounding_cfg = getattr(step, "_grounding_config", None)
+        grounding_hash = ""
+        if grounding_cfg is not None:
+            grounding_hash = hashlib.sha256(
+                grounding_cfg.model_dump_json().encode("utf-8")
+            ).hexdigest()
         return compute_cache_key(
             step_name=step.name,
             row=row,
@@ -168,6 +175,7 @@ def _compute_step_cache_key(
             system_prompt_header_hash=hashlib.sha256(
                 system_prompt_header.encode("utf-8")
             ).hexdigest(),
+            grounding_hash=grounding_hash,
         )
     else:
         # FunctionStep path

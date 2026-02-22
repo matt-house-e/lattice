@@ -2,17 +2,25 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Optional
 
 from ...schemas.base import UsageInfo
+from ...schemas.grounding import Citation
 from .base import LLMAPIError, LLMResponse
+
+logger = logging.getLogger(__name__)
 
 
 class GoogleClient:
     """Adapter for Google's Gemini models.
 
     Requires: pip install lattice[google]
+
+    Supports the ``google_search`` grounding tool.  When grounding is active,
+    structured outputs (``response_json_schema``) are disabled because the
+    combination is unsupported on Gemini 2.x models.
     """
 
     def __init__(self, api_key: str | None = None):
@@ -38,6 +46,7 @@ class GoogleClient:
         temperature: float,
         max_tokens: int,
         response_format: dict[str, Any] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
         client = self._get_client()
 
@@ -61,15 +70,25 @@ class GoogleClient:
             }
             if system_instruction:
                 config["system_instruction"] = system_instruction
+
+            # Translate tools (e.g. web_search → google_search)
+            gemini_tools = _translate_tools(tools, types) if tools else None
+            if gemini_tools:
+                config["tools"] = gemini_tools
+
             if response_format:
                 fmt_type = response_format.get("type")
                 if fmt_type == "json_schema":
                     # Structured outputs: extract schema, pass as response_json_schema
-                    inner = response_format.get("json_schema", {})
-                    schema = inner.get("schema", {})
-                    config["response_mime_type"] = "application/json"
-                    if schema:
-                        config["response_json_schema"] = schema
+                    # IMPORTANT: incompatible with google_search on Gemini 2.x
+                    if not gemini_tools:
+                        inner = response_format.get("json_schema", {})
+                        schema = inner.get("schema", {})
+                        config["response_mime_type"] = "application/json"
+                        if schema:
+                            config["response_json_schema"] = schema
+                    else:
+                        config["response_mime_type"] = "application/json"
                 elif fmt_type == "json_object":
                     config["response_mime_type"] = "application/json"
 
@@ -97,6 +116,10 @@ class GoogleClient:
             ) from exc
 
         content = response.text or ""
+
+        # Extract citations from grounding metadata
+        citations = _extract_citations(response) if gemini_tools else []
+
         usage = None
         if response.usage_metadata:
             prompt_tokens = response.usage_metadata.prompt_token_count or 0
@@ -108,4 +131,64 @@ class GoogleClient:
                 model=model,
             )
 
-        return LLMResponse(content=content, usage=usage)
+        return LLMResponse(content=content, usage=usage, citations=citations)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _translate_tools(tools: list[dict[str, Any]], types: Any) -> list[Any]:
+    """Translate generic Lattice tool dicts to Gemini Tool objects."""
+    gemini_tools: list[Any] = []
+    for tool in tools:
+        if tool.get("type") == "web_search":
+            gs_kwargs: dict[str, Any] = {}
+            # Google supports exclude_domains (mapped from blocked_domains)
+            if "blocked_domains" in tool:
+                gs_kwargs["exclude_domains"] = tool["blocked_domains"]
+            # Google does not support allowed_domains
+            if "allowed_domains" in tool:
+                logger.warning(
+                    "GoogleClient: allowed_domains is not supported by Google Search. "
+                    "The parameter will be ignored."
+                )
+            # Merge provider-specific kwargs (pass-through)
+            if "provider_kwargs" in tool:
+                gs_kwargs.update(tool["provider_kwargs"])
+            gemini_tools.append(
+                types.Tool(google_search=types.GoogleSearch(**gs_kwargs))
+            )
+    return gemini_tools
+
+
+def _extract_citations(response: Any) -> list[Citation]:
+    """Extract citations from Gemini grounding metadata."""
+    citations: list[Citation] = []
+    seen_urls: set[str] = set()
+
+    candidates = getattr(response, "candidates", None)
+    if not candidates:
+        return citations
+
+    metadata = getattr(candidates[0], "grounding_metadata", None)
+    if not metadata:
+        return citations
+
+    chunks = getattr(metadata, "grounding_chunks", None)
+    if not chunks:
+        return citations
+
+    for chunk in chunks:
+        web = getattr(chunk, "web", None)
+        if not web:
+            continue
+        url = getattr(web, "uri", "") or ""
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            citations.append(Citation(
+                url=url,
+                title=getattr(web, "title", "") or "",
+            ))
+    return citations
