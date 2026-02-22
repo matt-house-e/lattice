@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+
 class CacheManager:
     """SQLite-backed cache for step results.
 
@@ -52,21 +53,15 @@ class CacheManager:
                 expires_at REAL
             )
         """)
-        self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_step ON cache(step_name)"
-        )
-        self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_expires ON cache(expires_at)"
-        )
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_step ON cache(step_name)")
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_expires ON cache(expires_at)")
         self._conn.commit()
         return self._conn
 
     def get(self, key: str) -> dict | None:
         """Look up a cached value by key. Returns None on miss or expiry."""
         conn = self._ensure_connection()
-        row = conn.execute(
-            "SELECT value, expires_at FROM cache WHERE key = ?", (key,)
-        ).fetchone()
+        row = conn.execute("SELECT value, expires_at FROM cache WHERE key = ?", (key,)).fetchone()
 
         if row is None:
             return None
@@ -95,9 +90,7 @@ class CacheManager:
     def delete_step(self, step_name: str) -> int:
         """Delete all cache entries for a step. Returns count deleted."""
         conn = self._ensure_connection()
-        cursor = conn.execute(
-            "DELETE FROM cache WHERE step_name = ?", (step_name,)
-        )
+        cursor = conn.execute("DELETE FROM cache WHERE step_name = ?", (step_name,))
         conn.commit()
         return cursor.rowcount
 
@@ -169,9 +162,7 @@ def _compute_step_cache_key(
             field_specs=step_fields,
             model=step.model,
             temperature=getattr(step, "temperature", None),
-            system_prompt_hash=hashlib.sha256(
-                system_prompt.encode("utf-8")
-            ).hexdigest(),
+            system_prompt_hash=hashlib.sha256(system_prompt.encode("utf-8")).hexdigest(),
             system_prompt_header_hash=hashlib.sha256(
                 system_prompt_header.encode("utf-8")
             ).hexdigest(),

@@ -71,8 +71,7 @@ def web_search(
         )
     if tool_type not in _VALID_TOOL_TYPES:
         raise ValueError(
-            f"tool_type must be one of {sorted(_VALID_TOOL_TYPES)}, "
-            f"got {tool_type!r}"
+            f"tool_type must be one of {sorted(_VALID_TOOL_TYPES)}, " f"got {tool_type!r}"
         )
     if allowed_domains and tool_type != "web_search":
         raise ValueError(
@@ -92,9 +91,7 @@ def web_search(
         try:
             formatted_query = query.format(**template_vars)
         except KeyError as exc:
-            raise ValueError(
-                f"web_search query template references missing field: {exc}"
-            ) from exc
+            raise ValueError(f"web_search query template references missing field: {exc}") from exc
 
         key = api_key or os.environ.get("OPENAI_API_KEY")
         client = AsyncOpenAI(api_key=key)

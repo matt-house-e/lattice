@@ -6,7 +6,7 @@ import asyncio
 import inspect
 import time as _time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 import pandas as pd
 from tqdm.auto import tqdm
@@ -220,11 +220,14 @@ class Pipeline:
             )
 
         # Fire on_pipeline_start
-        await _fire_hook(hooks.on_pipeline_start, PipelineStartEvent(
-            step_names=self.step_names,
-            num_rows=len(rows),
-            config=config,
-        ))
+        await _fire_hook(
+            hooks.on_pipeline_start,
+            PipelineStartEvent(
+                step_names=self.step_names,
+                num_rows=len(rows),
+                config=config,
+            ),
+        )
 
         pipeline_start = _time.monotonic()
         accumulated = None
@@ -245,12 +248,15 @@ class Pipeline:
                 cache_manager.close()
             # Fire on_pipeline_end even on error
             elapsed = _time.monotonic() - pipeline_start
-            await _fire_hook(hooks.on_pipeline_end, PipelineEndEvent(
-                num_rows=len(rows),
-                total_errors=len(errors),
-                cost=cost,
-                elapsed_seconds=elapsed,
-            ))
+            await _fire_hook(
+                hooks.on_pipeline_end,
+                PipelineEndEvent(
+                    num_rows=len(rows),
+                    total_errors=len(errors),
+                    cost=cost,
+                    elapsed_seconds=elapsed,
+                ),
+            )
 
         # Build output matching input type
         if input_is_list:
@@ -373,9 +379,7 @@ class Pipeline:
         for step in self._steps:
             for dep in step.depends_on:
                 if dep not in self._step_map:
-                    raise PipelineError(
-                        f"Step '{step.name}' depends on unknown step '{dep}'"
-                    )
+                    raise PipelineError(f"Step '{step.name}' depends on unknown step '{dep}'")
 
         self._execution_levels = self._topological_sort()
 
@@ -424,10 +428,10 @@ class Pipeline:
         rows: list[dict[str, Any]],
         all_fields: dict[str, dict[str, Any]],
         config: EnrichmentConfig | None = None,
-        prior_step_results: Optional[dict[str, list[dict[str, Any]]]] = None,
-        on_step_complete: Optional[Callable[[str, list[dict[str, Any]]], None]] = None,
+        prior_step_results: dict[str, list[dict[str, Any]]] | None = None,
+        on_step_complete: Callable[[str, list[dict[str, Any]]], None] | None = None,
         cache_manager: Any = None,
-        on_partial_checkpoint: Optional[Callable[[str, list[dict], int], None]] = None,
+        on_partial_checkpoint: Callable[[str, list[dict], int], None] | None = None,
         hooks: EnrichmentHooks | None = None,
     ) -> tuple[list[dict[str, Any]], list[RowError], CostSummary]:
         """Execute the pipeline across all rows (column-oriented).
@@ -486,11 +490,14 @@ class Pipeline:
 
                 # Fire on_step_start for each step in this level
                 for step_name in steps_to_run:
-                    await _fire_hook(hooks.on_step_start, StepStartEvent(
-                        step_name=step_name,
-                        num_rows=num_rows,
-                        level=level_idx,
-                    ))
+                    await _fire_hook(
+                        hooks.on_step_start,
+                        StepStartEvent(
+                            step_name=step_name,
+                            num_rows=num_rows,
+                            level=level_idx,
+                        ),
+                    )
 
                 level_coros = [
                     self._execute_step(
@@ -511,19 +518,24 @@ class Pipeline:
                 ]
                 step_results_list = await asyncio.gather(*level_coros)
 
-                for step_name, (step_errors, usage, elapsed_s) in zip(steps_to_run, step_results_list):
+                for step_name, (step_errors, usage, elapsed_s) in zip(
+                    steps_to_run, step_results_list
+                ):
                     all_errors.extend(step_errors)
                     if usage:
                         step_usage_map[step_name] = usage
 
                     # Fire on_step_end
-                    await _fire_hook(hooks.on_step_end, StepEndEvent(
-                        step_name=step_name,
-                        num_rows=num_rows,
-                        num_errors=len(step_errors),
-                        usage=usage,
-                        elapsed_seconds=elapsed_s,
-                    ))
+                    await _fire_hook(
+                        hooks.on_step_end,
+                        StepEndEvent(
+                            step_name=step_name,
+                            num_rows=num_rows,
+                            num_errors=len(step_errors),
+                            usage=usage,
+                            elapsed_seconds=elapsed_s,
+                        ),
+                    )
 
                 step_bar.update(len(steps_to_run))
 
@@ -563,7 +575,7 @@ class Pipeline:
         on_error: str = "continue",
         cache_manager: Any = None,
         checkpoint_interval: int = 0,
-        on_partial_checkpoint: Optional[Callable] = None,
+        on_partial_checkpoint: Callable | None = None,
         hooks: EnrichmentHooks | None = None,
     ) -> tuple[list[RowError], StepUsage | None, float]:
         """Execute a single step across all rows concurrently.
@@ -673,18 +685,23 @@ class Pipeline:
                     results[idx] = {f: None for f in step.fields}
                     logger.warning(
                         "Row %d failed in step '%s': %s",
-                        idx, step.name, exc,
+                        idx,
+                        step.name,
+                        exc,
                     )
 
                     # Fire on_row_complete for error
-                    await _fire_hook(hooks.on_row_complete, RowCompleteEvent(
-                        step_name=step.name,
-                        row_index=idx,
-                        values={f: None for f in step.fields},
-                        error=exc,
-                        from_cache=False,
-                        skipped=row_was_skipped[idx],
-                    ))
+                    await _fire_hook(
+                        hooks.on_row_complete,
+                        RowCompleteEvent(
+                            step_name=step.name,
+                            row_index=idx,
+                            values={f: None for f in step.fields},
+                            error=exc,
+                            from_cache=False,
+                            skipped=row_was_skipped[idx],
+                        ),
+                    )
 
                     if on_error == "raise":
                         step_values[step.name] = results
@@ -698,14 +715,17 @@ class Pipeline:
                         usage_list.append(result_or_none.usage)
 
                     # Fire on_row_complete for success
-                    await _fire_hook(hooks.on_row_complete, RowCompleteEvent(
-                        step_name=step.name,
-                        row_index=idx,
-                        values=result_or_none.values,
-                        error=None,
-                        from_cache=row_from_cache[idx],
-                        skipped=row_was_skipped[idx],
-                    ))
+                    await _fire_hook(
+                        hooks.on_row_complete,
+                        RowCompleteEvent(
+                            step_name=step.name,
+                            row_index=idx,
+                            values=result_or_none.values,
+                            error=None,
+                            from_cache=row_from_cache[idx],
+                            skipped=row_was_skipped[idx],
+                        ),
+                    )
 
                 completed_count += 1
                 if completed_count % checkpoint_interval == 0:
@@ -726,18 +746,23 @@ class Pipeline:
                     results[idx] = {f: None for f in step.fields}
                     logger.warning(
                         "Row %d failed in step '%s': %s",
-                        idx, step.name, result_or_exc,
+                        idx,
+                        step.name,
+                        result_or_exc,
                     )
 
                     # Fire on_row_complete for error
-                    await _fire_hook(hooks.on_row_complete, RowCompleteEvent(
-                        step_name=step.name,
-                        row_index=idx,
-                        values={f: None for f in step.fields},
-                        error=result_or_exc,
-                        from_cache=False,
-                        skipped=row_was_skipped[idx],
-                    ))
+                    await _fire_hook(
+                        hooks.on_row_complete,
+                        RowCompleteEvent(
+                            step_name=step.name,
+                            row_index=idx,
+                            values={f: None for f in step.fields},
+                            error=result_or_exc,
+                            from_cache=False,
+                            skipped=row_was_skipped[idx],
+                        ),
+                    )
 
                     if on_error == "raise":
                         # Store partial results before raising
@@ -749,14 +774,17 @@ class Pipeline:
                         usage_list.append(result_or_exc.usage)
 
                     # Fire on_row_complete for success
-                    await _fire_hook(hooks.on_row_complete, RowCompleteEvent(
-                        step_name=step.name,
-                        row_index=idx,
-                        values=result_or_exc.values,
-                        error=None,
-                        from_cache=row_from_cache[idx],
-                        skipped=row_was_skipped[idx],
-                    ))
+                    await _fire_hook(
+                        hooks.on_row_complete,
+                        RowCompleteEvent(
+                            step_name=step.name,
+                            row_index=idx,
+                            values=result_or_exc.values,
+                            error=None,
+                            from_cache=row_from_cache[idx],
+                            skipped=row_was_skipped[idx],
+                        ),
+                    )
 
         step_values[step.name] = results
 

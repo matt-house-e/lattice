@@ -44,10 +44,12 @@ class TestFieldSpecValid:
             assert spec.type == t
 
     def test_model_validate_from_dict(self):
-        spec = FieldSpec.model_validate({
-            "prompt": "test",
-            "enum": ["A", "B"],
-        })
+        spec = FieldSpec.model_validate(
+            {
+                "prompt": "test",
+                "enum": ["A", "B"],
+            }
+        )
         assert spec.prompt == "test"
         assert spec.enum == ["A", "B"]
 

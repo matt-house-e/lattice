@@ -5,7 +5,7 @@ Thank you for your interest in contributing to Lattice! This document provides g
 ## Development Setup
 
 ### Prerequisites
-- Python 3.9 or higher
+- Python 3.10 or higher
 - Git
 
 ### Setting Up the Development Environment

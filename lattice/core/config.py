@@ -5,8 +5,9 @@ Defaults are tuned for fast processing on OpenAI Tier 2+ accounts.
 For Tier 1 accounts, reduce max_workers to 5-10.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -63,7 +64,7 @@ class EnrichmentConfig:
     enable_checkpointing: bool = False
     """Save results after each step completes for crash recovery."""
 
-    checkpoint_dir: Optional[str] = None
+    checkpoint_dir: str | None = None
     """Directory for checkpoint files. None = temp directory."""
 
     auto_resume: bool = True
@@ -95,11 +96,13 @@ class EnrichmentConfig:
         if self.cache_ttl < 0:
             raise ValueError(f"cache_ttl must be non-negative, got {self.cache_ttl}")
         if self.checkpoint_interval < 0:
-            raise ValueError(f"checkpoint_interval must be non-negative, got {self.checkpoint_interval}")
+            raise ValueError(
+                f"checkpoint_interval must be non-negative, got {self.checkpoint_interval}"
+            )
 
     # === Presets ===
     @classmethod
-    def for_development(cls) -> 'EnrichmentConfig':
+    def for_development(cls) -> "EnrichmentConfig":
         """Low concurrency, verbose logging, caching on. Safe for Tier 1 accounts."""
         return cls(
             max_workers=5,
@@ -110,7 +113,7 @@ class EnrichmentConfig:
         )
 
     @classmethod
-    def for_production(cls) -> 'EnrichmentConfig':
+    def for_production(cls) -> "EnrichmentConfig":
         """High concurrency with caching and checkpointing. For Tier 2+ accounts."""
         return cls(
             max_workers=30,
@@ -123,7 +126,7 @@ class EnrichmentConfig:
         )
 
     @classmethod
-    def for_server(cls) -> 'EnrichmentConfig':
+    def for_server(cls) -> "EnrichmentConfig":
         """Async server context (FastAPI). No progress bars, high concurrency."""
         return cls(
             max_workers=30,

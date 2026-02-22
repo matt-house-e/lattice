@@ -32,9 +32,7 @@ class GoogleClient:
             try:
                 from google import genai
             except ImportError:
-                raise ImportError(
-                    "google-genai package required: pip install lattice[google]"
-                )
+                raise ImportError("google-genai package required: pip install lattice[google]")
             key = self._api_key or os.environ.get("GOOGLE_API_KEY")
             self._client = genai.Client(api_key=key)
         return self._client
@@ -111,9 +109,7 @@ class GoogleClient:
                     f"Google timeout for model '{model}': {exc}",
                     status_code=408,
                 ) from exc
-            raise LLMAPIError(
-                f"Google API error for model '{model}': {exc}"
-            ) from exc
+            raise LLMAPIError(f"Google API error for model '{model}': {exc}") from exc
 
         content = response.text or ""
 

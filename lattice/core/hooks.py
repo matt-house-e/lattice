@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from .config import EnrichmentConfig
@@ -87,11 +87,11 @@ class EnrichmentHooks:
     Hook errors are caught and logged; they never crash the pipeline.
     """
 
-    on_pipeline_start: Optional[Callable[[PipelineStartEvent], Any]] = None
-    on_pipeline_end: Optional[Callable[[PipelineEndEvent], Any]] = None
-    on_step_start: Optional[Callable[[StepStartEvent], Any]] = None
-    on_step_end: Optional[Callable[[StepEndEvent], Any]] = None
-    on_row_complete: Optional[Callable[[RowCompleteEvent], Any]] = None
+    on_pipeline_start: Callable[[PipelineStartEvent], Any] | None = None
+    on_pipeline_end: Callable[[PipelineEndEvent], Any] | None = None
+    on_step_start: Callable[[StepStartEvent], Any] | None = None
+    on_step_end: Callable[[StepEndEvent], Any] | None = None
+    on_row_complete: Callable[[RowCompleteEvent], Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,7 @@ class EnrichmentHooks:
 # ---------------------------------------------------------------------------
 
 
-async def _fire_hook(hook: Optional[Callable], event: Any) -> None:
+async def _fire_hook(hook: Callable | None, event: Any) -> None:
     """Call *hook* with *event*, awaiting if async.  Silently catches errors."""
     if hook is None:
         return

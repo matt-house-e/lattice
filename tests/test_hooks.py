@@ -21,7 +21,6 @@ from lattice.core.hooks import (
 from lattice.pipeline.pipeline import Pipeline, PipelineResult
 from lattice.steps.base import StepContext, StepResult
 
-
 # ---------------------------------------------------------------------------
 # _fire_hook unit tests
 # ---------------------------------------------------------------------------
@@ -170,10 +169,12 @@ class TestHooksIntegration:
             on_step_end=lambda e: ends.append(e),
         )
 
-        pipeline = Pipeline([
-            _MockStep("s1", fields=["f1"]),
-            _MockStep("s2", fields=["f2"], depends_on=["s1"]),
-        ])
+        pipeline = Pipeline(
+            [
+                _MockStep("s1", fields=["f1"]),
+                _MockStep("s2", fields=["f2"], depends_on=["s1"]),
+            ]
+        )
         await pipeline.run_async([{"x": 1}], hooks=hooks)
 
         assert len(starts) == 2
@@ -238,6 +239,7 @@ class TestHooksIntegration:
     @pytest.mark.asyncio
     async def test_hook_error_does_not_crash_pipeline(self):
         """A hook that raises should not break the pipeline."""
+
         def bad_hook(event):
             raise RuntimeError("hook exploded")
 
@@ -286,10 +288,12 @@ class TestHooksIntegration:
         events: list[RowCompleteEvent] = []
         hooks = EnrichmentHooks(on_row_complete=lambda e: events.append(e))
 
-        pipeline = Pipeline([
-            _MockStep("s1", fields=["f1"]),
-            _MockStep("s2", fields=["f2"], depends_on=["s1"]),
-        ])
+        pipeline = Pipeline(
+            [
+                _MockStep("s1", fields=["f1"]),
+                _MockStep("s2", fields=["f2"], depends_on=["s1"]),
+            ]
+        )
         await pipeline.run_async([{"x": 1}, {"x": 2}], hooks=hooks)
 
         assert len(events) == 4

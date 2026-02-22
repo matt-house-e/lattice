@@ -37,21 +37,23 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Refusal detection for default enforcement
 # ---------------------------------------------------------------------------
-REFUSAL_PATTERNS = frozenset({
-    "unable to determine",
-    "n/a",
-    "not available",
-    "not specified",
-    "insufficient data",
-    "unknown",
-    "not enough information",
-    "cannot determine",
-    "no data",
-    "no information",
-    "not applicable",
-    "data not available",
-    "information not available",
-})
+REFUSAL_PATTERNS = frozenset(
+    {
+        "unable to determine",
+        "n/a",
+        "not available",
+        "not specified",
+        "insufficient data",
+        "unknown",
+        "not enough information",
+        "cannot determine",
+        "no data",
+        "no information",
+        "not applicable",
+        "data not available",
+        "information not available",
+    }
+)
 
 
 class LLMStep:
@@ -264,9 +266,8 @@ class LLMStep:
         # Known providers that support structured outputs (json_schema)
         if self._client is not None and not isinstance(self._client, OpenAIClient):
             _supports_structured = (
-                (_AnthropicClient is not None and isinstance(self._client, _AnthropicClient))
-                or (_GoogleClient is not None and isinstance(self._client, _GoogleClient))
-            )
+                _AnthropicClient is not None and isinstance(self._client, _AnthropicClient)
+            ) or (_GoogleClient is not None and isinstance(self._client, _GoogleClient))
 
             if _supports_structured:
                 return build_json_schema(self._field_specs)
@@ -441,7 +442,9 @@ class LLMStep:
                         last_parse_error = exc
                         logger.warning(
                             "LLMStep '%s' parse attempt %d failed: %s",
-                            self.name, parse_attempt + 1, exc,
+                            self.name,
+                            parse_attempt + 1,
+                            exc,
                         )
                         # Feed the error back so the LLM can self-correct
                         messages.append({"role": "assistant", "content": content})
@@ -468,7 +471,7 @@ class LLMStep:
                 last_api_error = exc
                 if api_attempt < api_max_retries:
                     # Exponential backoff with jitter
-                    delay = retry_base_delay * (2 ** api_attempt)
+                    delay = retry_base_delay * (2**api_attempt)
                     # Respect Retry-After header if available
                     if exc.retry_after is not None:
                         delay = max(delay, exc.retry_after)
@@ -476,7 +479,11 @@ class LLMStep:
                     delay += random.uniform(0, delay * 0.25)
                     logger.warning(
                         "LLMStep '%s' API error (attempt %d/%d), retrying in %.1fs: %s",
-                        self.name, api_attempt + 1, api_max_retries + 1, delay, exc,
+                        self.name,
+                        api_attempt + 1,
+                        api_max_retries + 1,
+                        delay,
+                        exc,
                     )
                     await asyncio.sleep(delay)
 

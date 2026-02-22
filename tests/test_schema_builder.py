@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, get_args, get_origin
+from typing import Any, get_args, get_origin
 
 import pytest
 from pydantic import ValidationError
@@ -14,7 +14,6 @@ from lattice.steps.schema_builder import (
     build_json_schema,
     build_response_model,
 )
-
 
 # ---------------------------------------------------------------------------
 # Type mapping
@@ -67,11 +66,13 @@ class TestBuildDescription:
         assert "Examples: ex1; ex2" in desc
 
     def test_combined(self):
-        desc = _build_description(FieldSpec(
-            prompt="Estimate revenue",
-            format="$X.XM",
-            examples=["$2.5M", "$10.0M"],
-        ))
+        desc = _build_description(
+            FieldSpec(
+                prompt="Estimate revenue",
+                format="$X.XM",
+                examples=["$2.5M", "$10.0M"],
+            )
+        )
         assert "Estimate revenue" in desc
         assert "Format: $X.XM" in desc
         assert "Examples: $2.5M; $10.0M" in desc

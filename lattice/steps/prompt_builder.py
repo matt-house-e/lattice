@@ -60,6 +60,7 @@ def build_system_message(
 # Instruction portion (static — cacheable by OpenAI)
 # ---------------------------------------------------------------------------
 
+
 def _build_instructions(
     field_specs: dict[str, FieldSpec],
     field_names: list[str],
@@ -118,9 +119,7 @@ def _build_keys_section(field_specs: dict[str, FieldSpec]) -> str:
     if "bad_examples" in used:
         lines.append("- **bad_examples**: anti-patterns to avoid")
     if "default" in used:
-        lines.append(
-            "- **default**: last-resort fallback if you truly cannot determine the value"
-        )
+        lines.append("- **default**: last-resort fallback if you truly cannot determine the value")
 
     return "\n".join(lines)
 
@@ -134,7 +133,9 @@ def _build_output_rules(
     names_str = ", ".join(field_names)
 
     lines = ["# Output Rules"]
-    lines.append("- Return ONLY a single valid JSON object. No prose, no code fences, no explanations.")
+    lines.append(
+        "- Return ONLY a single valid JSON object. No prose, no code fences, no explanations."
+    )
     lines.append(f"- Top-level keys MUST be exactly: {names_str}")
     lines.append("- Keep outputs concise and information-dense.")
 
@@ -158,7 +159,7 @@ def _build_output_rules(
     else:
         lines.append(
             "- If you genuinely cannot determine a value, return "
-            "\"Unable to determine\" for String fields, null for other types."
+            '"Unable to determine" for String fields, null for other types.'
         )
 
     return "\n".join(lines)
@@ -167,6 +168,7 @@ def _build_output_rules(
 # ---------------------------------------------------------------------------
 # Data section (variable — row-specific)
 # ---------------------------------------------------------------------------
+
 
 def _build_data_section(
     field_specs: dict[str, FieldSpec],
@@ -184,9 +186,7 @@ def _build_data_section(
 
     # Prior results (only if present)
     if prior_results:
-        parts.append(
-            f"<prior_results>\n{json.dumps(prior_results, default=str)}\n</prior_results>"
-        )
+        parts.append(f"<prior_results>\n{json.dumps(prior_results, default=str)}\n</prior_results>")
 
     return "\n\n".join(parts)
 
@@ -228,19 +228,19 @@ def _build_field_specs_xml(field_specs: dict[str, FieldSpec]) -> str:
 # Reminder (sandwich pattern — key constraints after dynamic content)
 # ---------------------------------------------------------------------------
 
+
 def _build_reminder(field_names: list[str]) -> str:
     """Final reminder reiterating key constraints after all dynamic content."""
     names_str = ", ".join(field_names)
     return (
-        "# Reminder\n"
-        f"Return ONLY the JSON object with keys: {names_str}. "
-        "No additional text."
+        "# Reminder\n" f"Return ONLY the JSON object with keys: {names_str}. " "No additional text."
     )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _detect_used_keys(field_specs: dict[str, FieldSpec]) -> set[str]:
     """Detect which optional field spec keys are used across all fields."""

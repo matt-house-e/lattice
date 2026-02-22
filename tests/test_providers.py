@@ -13,7 +13,6 @@ from lattice.schemas.base import UsageInfo
 from lattice.steps.providers.base import LLMAPIError, LLMClient, LLMResponse
 from lattice.steps.providers.openai import OpenAIClient
 
-
 # -- LLMResponse ---------------------------------------------------------
 
 
@@ -344,7 +343,10 @@ class TestOpenAIClientResponses:
 
         with pytest.raises(LLMAPIError) as exc_info:
             await client.complete(
-                messages=[], model="test", temperature=0.0, max_tokens=10,
+                messages=[],
+                model="test",
+                temperature=0.0,
+                max_tokens=10,
             )
 
         assert exc_info.value.is_rate_limit is True
@@ -365,7 +367,10 @@ class TestOpenAIClientResponses:
 
         with pytest.raises(LLMAPIError) as exc_info:
             await client.complete(
-                messages=[], model="test", temperature=0.0, max_tokens=10,
+                messages=[],
+                model="test",
+                temperature=0.0,
+                max_tokens=10,
             )
 
         assert exc_info.value.status_code == 408
@@ -778,7 +783,8 @@ class TestGoogleClient:
             text='{"f1": "val"}',
             candidates=None,
             usage_metadata=SimpleNamespace(
-                prompt_token_count=10, candidates_token_count=5,
+                prompt_token_count=10,
+                candidates_token_count=5,
             ),
         )
         mock_client = MagicMock()
@@ -811,7 +817,8 @@ class TestGoogleClient:
             text='{"f1": "val"}',
             candidates=None,
             usage_metadata=SimpleNamespace(
-                prompt_token_count=10, candidates_token_count=5,
+                prompt_token_count=10,
+                candidates_token_count=5,
             ),
         )
         mock_client = MagicMock()

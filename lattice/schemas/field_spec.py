@@ -1,6 +1,8 @@
 """FieldSpec — Pydantic model for the 7-key field specification."""
 
-from typing import Any, List, Literal, Optional
+from __future__ import annotations
+
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -31,8 +33,8 @@ class FieldSpec(BaseModel):
 
     prompt: str
     type: VALID_TYPES = "String"
-    format: Optional[str] = None
-    enum: Optional[List[str]] = None
-    examples: Optional[List[str]] = None
-    bad_examples: Optional[List[str]] = None
+    format: str | None = None
+    enum: list[str] | None = None
+    examples: list[str] | None = None
+    bad_examples: list[str] | None = None
     default: Any = None

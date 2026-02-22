@@ -15,13 +15,13 @@ from lattice.schemas.base import CostSummary
 from lattice.steps.function import FunctionStep
 from lattice.steps.llm import LLMStep
 
-
 # -- helpers -----------------------------------------------------------------
 
 
 def _identity_step(name: str, fields: list[str], **kwargs) -> FunctionStep:
     def fn(ctx):
         return {f: f"{f}_value" for f in fields}
+
     return FunctionStep(name=name, fn=fn, fields=fields, **kwargs)
 
 
@@ -61,10 +61,15 @@ class TestPipelineRun:
 
     def test_run_filters_internal_fields(self):
         """__ prefixed fields are not in the output DataFrame."""
-        pipeline = Pipeline([
-            FunctionStep("s", fn=lambda ctx: {"__internal": "secret", "visible": "yes"},
-                         fields=["__internal", "visible"]),
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"__internal": "secret", "visible": "yes"},
+                    fields=["__internal", "visible"],
+                ),
+            ]
+        )
         df = pd.DataFrame({"x": [1]})
 
         result = pipeline.run(df)
@@ -78,10 +83,12 @@ class TestPipelineRun:
         def step_b_fn(ctx):
             return {"final": ctx.prior_results["intermediate"] + "_done"}
 
-        pipeline = Pipeline([
-            FunctionStep("a", fn=step_a_fn, fields=["intermediate"]),
-            FunctionStep("b", fn=step_b_fn, fields=["final"], depends_on=["a"]),
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep("a", fn=step_a_fn, fields=["intermediate"]),
+                FunctionStep("b", fn=step_b_fn, fields=["final"], depends_on=["a"]),
+            ]
+        )
         df = pd.DataFrame({"input": ["hello", "world"]})
 
         result = pipeline.run(df)
@@ -142,22 +149,28 @@ class TestPipelineRunner:
 
 class TestInlineFieldSpecs:
     def test_dict_string_shorthand(self):
-        step = LLMStep("analyze", fields={
-            "market_size": "Estimate TAM in billions USD",
-            "competition": "Rate Low/Medium/High",
-        })
+        step = LLMStep(
+            "analyze",
+            fields={
+                "market_size": "Estimate TAM in billions USD",
+                "competition": "Rate Low/Medium/High",
+            },
+        )
         assert step.fields == ["market_size", "competition"]
         # _field_specs now stores FieldSpec objects
         assert step._field_specs["market_size"].prompt == "Estimate TAM in billions USD"
         assert step._field_specs["competition"].prompt == "Rate Low/Medium/High"
 
     def test_dict_full_spec(self):
-        step = LLMStep("analyze", fields={
-            "market_size": {
-                "prompt": "Estimate TAM",
-                "type": "String",
+        step = LLMStep(
+            "analyze",
+            fields={
+                "market_size": {
+                    "prompt": "Estimate TAM",
+                    "type": "String",
+                },
             },
-        })
+        )
         assert step.fields == ["market_size"]
         assert step._field_specs["market_size"].type == "String"
 
@@ -169,9 +182,12 @@ class TestInlineFieldSpecs:
     def test_inline_specs_used_in_system_message(self):
         from lattice.steps.base import StepContext
 
-        step = LLMStep("analyze", fields={
-            "market_size": "Estimate TAM in billions USD",
-        })
+        step = LLMStep(
+            "analyze",
+            fields={
+                "market_size": "Estimate TAM in billions USD",
+            },
+        )
         ctx = StepContext(
             row={"company": "Acme"},
             fields={},
@@ -181,13 +197,18 @@ class TestInlineFieldSpecs:
         assert "Estimate TAM in billions USD" in msg
 
     def test_collect_field_specs_from_pipeline(self):
-        pipeline = Pipeline([
-            LLMStep("analyze", fields={
-                "market_size": "Estimate TAM",
-                "competition": {"prompt": "Rate competition", "type": "String"},
-            }),
-            FunctionStep("search", fn=lambda ctx: {"__ctx": "data"}, fields=["__ctx"]),
-        ])
+        pipeline = Pipeline(
+            [
+                LLMStep(
+                    "analyze",
+                    fields={
+                        "market_size": "Estimate TAM",
+                        "competition": {"prompt": "Rate competition", "type": "String"},
+                    },
+                ),
+                FunctionStep("search", fn=lambda ctx: {"__ctx": "data"}, fields=["__ctx"]),
+            ]
+        )
         specs = pipeline._collect_field_specs()
         assert "market_size" in specs
         assert specs["market_size"]["prompt"] == "Estimate TAM"
@@ -201,17 +222,27 @@ class TestInlineFieldSpecs:
         from lattice.schemas.base import UsageInfo
 
         mock_client = AsyncMock()
-        mock_client.complete = AsyncMock(return_value=LLMResponse(
-            content=json.dumps({"market_size": "$5B", "competition": "High"}),
-            usage=UsageInfo(prompt_tokens=50, completion_tokens=20, total_tokens=70, model="test"),
-        ))
+        mock_client.complete = AsyncMock(
+            return_value=LLMResponse(
+                content=json.dumps({"market_size": "$5B", "competition": "High"}),
+                usage=UsageInfo(
+                    prompt_tokens=50, completion_tokens=20, total_tokens=70, model="test"
+                ),
+            )
+        )
 
-        pipeline = Pipeline([
-            LLMStep("analyze", fields={
-                "market_size": "Estimate TAM",
-                "competition": "Rate competition level",
-            }, client=mock_client),
-        ])
+        pipeline = Pipeline(
+            [
+                LLMStep(
+                    "analyze",
+                    fields={
+                        "market_size": "Estimate TAM",
+                        "competition": "Rate competition level",
+                    },
+                    client=mock_client,
+                ),
+            ]
+        )
 
         df = pd.DataFrame({"company": ["Acme"]})
         result = pipeline.run(df)
@@ -233,12 +264,13 @@ class TestPipelineResult:
 
     def test_success_rate_with_errors(self):
         from lattice.core.exceptions import RowError
+
         r = PipelineResult(
             data=pd.DataFrame({"x": [1, 2, 3]}),
             errors=[RowError(row_index=1, step_name="s", error=ValueError("bad"))],
         )
         assert r.has_errors
-        assert abs(r.success_rate - 2/3) < 0.01
+        assert abs(r.success_rate - 2 / 3) < 0.01
 
     def test_empty_dataframe(self):
         r = PipelineResult(data=pd.DataFrame())

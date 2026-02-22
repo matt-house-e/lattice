@@ -17,7 +17,6 @@ from lattice.steps.base import Step, StepContext, StepResult
 from lattice.steps.llm import LLMStep
 from lattice.steps.providers.base import LLMAPIError, LLMResponse
 
-
 # -- helpers -------------------------------------------------------------
 
 
@@ -31,7 +30,9 @@ def _make_ctx(**overrides: Any) -> StepContext:
     return StepContext(**defaults)
 
 
-def _mock_llm_response(content: str, prompt_tokens: int = 10, completion_tokens: int = 5) -> LLMResponse:
+def _mock_llm_response(
+    content: str, prompt_tokens: int = 10, completion_tokens: int = 5
+) -> LLMResponse:
     """Build a fake LLMResponse."""
     return LLMResponse(
         content=content,
@@ -88,7 +89,8 @@ class TestLLMStepConstruction:
 
     def test_system_prompt_header_stored(self):
         step = LLMStep(
-            name="llm", fields=["f1"],
+            name="llm",
+            fields=["f1"],
             system_prompt_header="Analyzing B2B SaaS companies.",
         )
         assert step._system_prompt_header == "Analyzing B2B SaaS companies."
@@ -99,21 +101,30 @@ class TestLLMStepConstruction:
 
     def test_field_spec_validation_rejects_unknown_keys(self):
         with pytest.raises(ValidationError, match="extra_forbidden"):
-            LLMStep("llm", fields={
-                "f1": {"prompt": "test", "unknown_key": "bad"},
-            })
+            LLMStep(
+                "llm",
+                fields={
+                    "f1": {"prompt": "test", "unknown_key": "bad"},
+                },
+            )
 
     def test_field_spec_validation_rejects_invalid_type(self):
         with pytest.raises(ValidationError):
-            LLMStep("llm", fields={
-                "f1": {"prompt": "test", "type": "InvalidType"},
-            })
+            LLMStep(
+                "llm",
+                fields={
+                    "f1": {"prompt": "test", "type": "InvalidType"},
+                },
+            )
 
     def test_field_spec_validation_requires_prompt(self):
         with pytest.raises(ValidationError, match="prompt"):
-            LLMStep("llm", fields={
-                "f1": {"type": "String"},  # missing prompt
-            })
+            LLMStep(
+                "llm",
+                fields={
+                    "f1": {"type": "String"},  # missing prompt
+                },
+            )
 
 
 # -- client resolution ---------------------------------------------------
@@ -139,8 +150,7 @@ class TestLLMStepClient:
     @patch("openai.AsyncOpenAI")
     def test_base_url_creates_openai_client(self, mock_cls):
         step = LLMStep(
-            name="llm", fields=["f1"],
-            base_url="http://localhost:11434/v1", api_key="test"
+            name="llm", fields=["f1"], base_url="http://localhost:11434/v1", api_key="test"
         )
         client = step._resolve_client()
         assert client is not None
@@ -197,7 +207,8 @@ class TestLLMStepMessageBuilding:
 
     def test_system_prompt_header_passed_to_builder(self):
         step = LLMStep(
-            name="llm", fields={"f1": "test"},
+            name="llm",
+            fields={"f1": "test"},
             system_prompt_header="Analyzing European markets.",
         )
         ctx = _make_ctx()
@@ -207,9 +218,12 @@ class TestLLMStepMessageBuilding:
         assert "Analyzing European markets." in msg
 
     def test_dynamic_prompt_describes_used_keys_only(self):
-        step = LLMStep(name="llm", fields={
-            "f1": {"prompt": "test", "enum": ["A", "B"]},
-        })
+        step = LLMStep(
+            name="llm",
+            fields={
+                "f1": {"prompt": "test", "enum": ["A", "B"]},
+            },
+        )
         ctx = _make_ctx()
         msg = step._build_system_message(ctx)
 
@@ -235,7 +249,9 @@ class TestLLMStepRun:
     async def test_successful_run(self):
         resp = _mock_llm_response(json.dumps({"market_size": "Large"}))
         mock_client = _make_mock_client(resp)
-        step = LLMStep(name="llm", fields={"market_size": "Estimate market size"}, client=mock_client)
+        step = LLMStep(
+            name="llm", fields={"market_size": "Estimate market size"}, client=mock_client
+        )
 
         result = await step.run(_make_ctx())
 
@@ -291,9 +307,13 @@ class TestDefaultEnforcement:
     async def test_refusal_replaced_with_default(self):
         resp = _mock_llm_response(json.dumps({"f1": "Unable to determine"}))
         mock_client = _make_mock_client(resp)
-        step = LLMStep(name="llm", fields={
-            "f1": {"prompt": "test", "default": "N/A"},
-        }, client=mock_client)
+        step = LLMStep(
+            name="llm",
+            fields={
+                "f1": {"prompt": "test", "default": "N/A"},
+            },
+            client=mock_client,
+        )
 
         result = await step.run(_make_ctx())
         assert result.values["f1"] == "N/A"
@@ -302,9 +322,13 @@ class TestDefaultEnforcement:
     async def test_null_replaced_with_default(self):
         resp = _mock_llm_response(json.dumps({"f1": None}))
         mock_client = _make_mock_client(resp)
-        step = LLMStep(name="llm", fields={
-            "f1": {"prompt": "test", "default": "fallback"},
-        }, client=mock_client)
+        step = LLMStep(
+            name="llm",
+            fields={
+                "f1": {"prompt": "test", "default": "fallback"},
+            },
+            client=mock_client,
+        )
 
         result = await step.run(_make_ctx())
         assert result.values["f1"] == "fallback"
@@ -313,9 +337,13 @@ class TestDefaultEnforcement:
     async def test_empty_string_replaced_with_default(self):
         resp = _mock_llm_response(json.dumps({"f1": "  "}))
         mock_client = _make_mock_client(resp)
-        step = LLMStep(name="llm", fields={
-            "f1": {"prompt": "test", "default": "fallback"},
-        }, client=mock_client)
+        step = LLMStep(
+            name="llm",
+            fields={
+                "f1": {"prompt": "test", "default": "fallback"},
+            },
+            client=mock_client,
+        )
 
         result = await step.run(_make_ctx())
         assert result.values["f1"] == "fallback"
@@ -325,9 +353,13 @@ class TestDefaultEnforcement:
         """Without default set, refusal text is left as-is."""
         resp = _mock_llm_response(json.dumps({"f1": "Unable to determine"}))
         mock_client = _make_mock_client(resp)
-        step = LLMStep(name="llm", fields={
-            "f1": {"prompt": "test"},  # no default
-        }, client=mock_client)
+        step = LLMStep(
+            name="llm",
+            fields={
+                "f1": {"prompt": "test"},  # no default
+            },
+            client=mock_client,
+        )
 
         result = await step.run(_make_ctx())
         assert result.values["f1"] == "Unable to determine"
@@ -337,9 +369,13 @@ class TestDefaultEnforcement:
         """Normal values are NOT replaced by default."""
         resp = _mock_llm_response(json.dumps({"f1": "Actual answer"}))
         mock_client = _make_mock_client(resp)
-        step = LLMStep(name="llm", fields={
-            "f1": {"prompt": "test", "default": "fallback"},
-        }, client=mock_client)
+        step = LLMStep(
+            name="llm",
+            fields={
+                "f1": {"prompt": "test", "default": "fallback"},
+            },
+            client=mock_client,
+        )
 
         result = await step.run(_make_ctx())
         assert result.values["f1"] == "Actual answer"
@@ -349,9 +385,13 @@ class TestDefaultEnforcement:
         """default=None explicitly set should replace refusals with None."""
         resp = _mock_llm_response(json.dumps({"f1": "Unknown"}))
         mock_client = _make_mock_client(resp)
-        step = LLMStep(name="llm", fields={
-            "f1": {"prompt": "test", "default": None},
-        }, client=mock_client)
+        step = LLMStep(
+            name="llm",
+            fields={
+                "f1": {"prompt": "test", "default": None},
+            },
+            client=mock_client,
+        )
 
         result = await step.run(_make_ctx())
         assert result.values["f1"] is None
@@ -380,9 +420,7 @@ class TestLLMStepRetries:
         bad_resp = _mock_llm_response(json.dumps({"f1": "not_an_int"}))
         good_resp = _mock_llm_response(json.dumps({"f1": 42}))
         mock_client = _make_mock_client([bad_resp, good_resp])
-        step = LLMStep(
-            name="llm", fields=["f1"], client=mock_client, schema=Strict, max_retries=2
-        )
+        step = LLMStep(name="llm", fields=["f1"], client=mock_client, schema=Strict, max_retries=2)
 
         result = await step.run(_make_ctx())
         assert result.values == {"f1": 42}
@@ -415,7 +453,10 @@ class TestLLMStepAPIRetries:
             ]
         )
         config = EnrichmentConfig(
-            temperature=0.2, max_tokens=100, max_retries=2, retry_base_delay=0.01,
+            temperature=0.2,
+            max_tokens=100,
+            max_retries=2,
+            retry_base_delay=0.01,
         )
         step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
 
@@ -434,7 +475,10 @@ class TestLLMStepAPIRetries:
             ]
         )
         config = EnrichmentConfig(
-            temperature=0.2, max_tokens=100, max_retries=2, retry_base_delay=0.01,
+            temperature=0.2,
+            max_tokens=100,
+            max_retries=2,
+            retry_base_delay=0.01,
         )
         step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
 
@@ -448,7 +492,10 @@ class TestLLMStepAPIRetries:
             side_effect=LLMAPIError("rate limited", status_code=429, is_rate_limit=True)
         )
         config = EnrichmentConfig(
-            temperature=0.2, max_tokens=100, max_retries=1, retry_base_delay=0.01,
+            temperature=0.2,
+            max_tokens=100,
+            max_retries=1,
+            retry_base_delay=0.01,
         )
         step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
 
@@ -466,7 +513,10 @@ class TestLLMStepAPIRetries:
             ]
         )
         config = EnrichmentConfig(
-            temperature=0.2, max_tokens=100, max_retries=2, retry_base_delay=0.001,
+            temperature=0.2,
+            max_tokens=100,
+            max_retries=2,
+            retry_base_delay=0.001,
         )
         step = LLMStep(name="llm", fields={"f1": "test"}, client=mock_client)
 
@@ -485,7 +535,10 @@ class TestLLMStepAPIRetries:
             ]
         )
         config = EnrichmentConfig(
-            temperature=0.2, max_tokens=100, max_retries=2, retry_base_delay=0.01,
+            temperature=0.2,
+            max_tokens=100,
+            max_retries=2,
+            retry_base_delay=0.01,
         )
         step = LLMStep(name="llm", fields=["f1"], client=mock_client, max_retries=1)
 
@@ -507,7 +560,10 @@ class TestLLMStepCustomSchema:
         resp = _mock_llm_response(json.dumps({"score": 0.95, "label": "positive"}))
         mock_client = _make_mock_client(resp)
         step = LLMStep(
-            name="llm", fields=["score", "label"], client=mock_client, schema=MySchema,
+            name="llm",
+            fields=["score", "label"],
+            client=mock_client,
+            schema=MySchema,
         )
 
         result = await step.run(_make_ctx())
@@ -532,6 +588,7 @@ class TestStructuredOutputs:
 
     def test_auto_off_for_custom_schema(self):
         """Custom schema → json_object."""
+
         class MySchema(BaseModel):
             f1: str
 
@@ -547,6 +604,7 @@ class TestStructuredOutputs:
     def test_auto_on_for_anthropic_client(self):
         """AnthropicClient + dict fields → json_schema (constrained decoding)."""
         from lattice.steps.providers.anthropic import AnthropicClient
+
         client = AnthropicClient(api_key="test")
         step = LLMStep(name="llm", fields={"f1": "test"}, client=client)
         assert step._use_structured_outputs is True
@@ -555,6 +613,7 @@ class TestStructuredOutputs:
     def test_auto_on_for_google_client(self):
         """GoogleClient + dict fields → json_schema."""
         from lattice.steps.providers.google import GoogleClient
+
         client = GoogleClient(api_key="test")
         step = LLMStep(name="llm", fields={"f1": "test"}, client=client)
         assert step._use_structured_outputs is True
@@ -574,7 +633,8 @@ class TestStructuredOutputs:
     def test_force_on_for_base_url(self):
         """structured_outputs=True forces json_schema even with base_url."""
         step = LLMStep(
-            name="llm", fields={"f1": "test"},
+            name="llm",
+            fields={"f1": "test"},
             base_url="http://api.groq.com/v1",
             structured_outputs=True,
         )
@@ -594,8 +654,10 @@ class TestStructuredOutputs:
 
         # Force json_object
         step = LLMStep(
-            name="llm", fields={"f1": "test"},
-            client=mock_client, structured_outputs=False,
+            name="llm",
+            fields={"f1": "test"},
+            client=mock_client,
+            structured_outputs=False,
         )
         await step.run(_make_ctx())
         call_kwargs = mock_client.complete.call_args
@@ -606,8 +668,10 @@ class TestStructuredOutputs:
         resp = _mock_llm_response(json.dumps({"f1": "val"}))
         mock_client = _make_mock_client(resp)
         step = LLMStep(
-            name="llm", fields={"f1": "test"},
-            client=mock_client, structured_outputs=False,
+            name="llm",
+            fields={"f1": "test"},
+            client=mock_client,
+            structured_outputs=False,
         )
         result = await step.run(_make_ctx())
         assert result.metadata["structured_outputs"] is False

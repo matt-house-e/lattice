@@ -12,7 +12,6 @@ from lattice.pipeline.pipeline import Pipeline
 from lattice.steps.base import StepContext, StepResult
 from lattice.steps.function import FunctionStep
 
-
 # -- helpers -------------------------------------------------------------
 
 
@@ -56,41 +55,51 @@ class TestPipelineConstruction:
         assert p.execution_levels == [["a"]]
 
     def test_two_independent_steps(self):
-        p = Pipeline([
-            FunctionStep("a", fn=lambda ctx: {}, fields=["f1"]),
-            FunctionStep("b", fn=lambda ctx: {}, fields=["f2"]),
-        ])
+        p = Pipeline(
+            [
+                FunctionStep("a", fn=lambda ctx: {}, fields=["f1"]),
+                FunctionStep("b", fn=lambda ctx: {}, fields=["f2"]),
+            ]
+        )
         assert p.execution_levels == [["a", "b"]]
 
     def test_linear_chain(self):
-        p = Pipeline([
-            FunctionStep("a", fn=lambda ctx: {}, fields=["f1"]),
-            FunctionStep("b", fn=lambda ctx: {}, fields=["f2"], depends_on=["a"]),
-            FunctionStep("c", fn=lambda ctx: {}, fields=["f3"], depends_on=["b"]),
-        ])
+        p = Pipeline(
+            [
+                FunctionStep("a", fn=lambda ctx: {}, fields=["f1"]),
+                FunctionStep("b", fn=lambda ctx: {}, fields=["f2"], depends_on=["a"]),
+                FunctionStep("c", fn=lambda ctx: {}, fields=["f3"], depends_on=["b"]),
+            ]
+        )
         assert p.execution_levels == [["a"], ["b"], ["c"]]
 
     def test_diamond_dependency(self):
-        p = Pipeline([
-            FunctionStep("a", fn=lambda ctx: {}, fields=["f1"]),
-            FunctionStep("b", fn=lambda ctx: {}, fields=["f2"], depends_on=["a"]),
-            FunctionStep("c", fn=lambda ctx: {}, fields=["f3"], depends_on=["a"]),
-            FunctionStep("d", fn=lambda ctx: {}, fields=["f4"], depends_on=["b", "c"]),
-        ])
+        p = Pipeline(
+            [
+                FunctionStep("a", fn=lambda ctx: {}, fields=["f1"]),
+                FunctionStep("b", fn=lambda ctx: {}, fields=["f2"], depends_on=["a"]),
+                FunctionStep("c", fn=lambda ctx: {}, fields=["f3"], depends_on=["a"]),
+                FunctionStep("d", fn=lambda ctx: {}, fields=["f4"], depends_on=["b", "c"]),
+            ]
+        )
         assert p.execution_levels == [["a"], ["b", "c"], ["d"]]
 
     def test_duplicate_name_raises(self):
         with pytest.raises(PipelineError, match="Duplicate step names"):
-            Pipeline([
-                FunctionStep("dup", fn=lambda ctx: {}, fields=["f1"]),
-                FunctionStep("dup", fn=lambda ctx: {}, fields=["f2"]),
-            ])
+            Pipeline(
+                [
+                    FunctionStep("dup", fn=lambda ctx: {}, fields=["f1"]),
+                    FunctionStep("dup", fn=lambda ctx: {}, fields=["f2"]),
+                ]
+            )
 
     def test_missing_dependency_raises(self):
         with pytest.raises(PipelineError, match="unknown step 'missing'"):
-            Pipeline([
-                FunctionStep("a", fn=lambda ctx: {}, fields=["f1"], depends_on=["missing"]),
-            ])
+            Pipeline(
+                [
+                    FunctionStep("a", fn=lambda ctx: {}, fields=["f1"], depends_on=["missing"]),
+                ]
+            )
 
     def test_cycle_two_steps(self):
         s1 = FunctionStep("a", fn=lambda ctx: {}, fields=["f1"], depends_on=["b"])
@@ -112,9 +121,11 @@ class TestPipelineConstruction:
 class TestPipelineExecution:
     @pytest.mark.asyncio
     async def test_single_step_execution(self):
-        p = Pipeline([
-            FunctionStep("a", fn=_identity_fn(["f1"]), fields=["f1"]),
-        ])
+        p = Pipeline(
+            [
+                FunctionStep("a", fn=_identity_fn(["f1"]), fields=["f1"]),
+            ]
+        )
         rows = [{"company": "Acme"}, {"company": "Beta"}]
         results, errors, cost = await p.execute(rows, all_fields={"f1": {"prompt": "test"}})
 
@@ -125,10 +136,12 @@ class TestPipelineExecution:
 
     @pytest.mark.asyncio
     async def test_two_independent_steps(self):
-        p = Pipeline([
-            FunctionStep("a", fn=_identity_fn(["f1"]), fields=["f1"]),
-            FunctionStep("b", fn=_identity_fn(["f2"]), fields=["f2"]),
-        ])
+        p = Pipeline(
+            [
+                FunctionStep("a", fn=_identity_fn(["f1"]), fields=["f1"]),
+                FunctionStep("b", fn=_identity_fn(["f2"]), fields=["f2"]),
+            ]
+        )
         results, errors, cost = await p.execute([{"x": 1}], all_fields={"f1": {}, "f2": {}})
 
         assert results[0] == {"f1": "f1_value", "f2": "f2_value"}
@@ -144,10 +157,12 @@ class TestPipelineExecution:
         def step_b_fn(ctx):
             return {"final": ctx.prior_results.get("intermediate", "") + "_done"}
 
-        p = Pipeline([
-            FunctionStep("a", fn=step_a_fn, fields=["intermediate"]),
-            FunctionStep("b", fn=step_b_fn, fields=["final"], depends_on=["a"]),
-        ])
+        p = Pipeline(
+            [
+                FunctionStep("a", fn=step_a_fn, fields=["intermediate"]),
+                FunctionStep("b", fn=step_b_fn, fields=["final"], depends_on=["a"]),
+            ]
+        )
 
         rows = [{"input": "hello"}, {"input": "world"}]
         results, errors, cost = await p.execute(rows, all_fields={})
@@ -160,29 +175,31 @@ class TestPipelineExecution:
     async def test_diamond_dependency_routing(self):
         """Diamond: A -> B, A -> C, B+C -> D."""
 
-        p = Pipeline([
-            FunctionStep("a", fn=lambda ctx: {"a_out": 1}, fields=["a_out"]),
-            FunctionStep(
-                "b",
-                fn=lambda ctx: {"b_out": ctx.prior_results["a_out"] + 10},
-                fields=["b_out"],
-                depends_on=["a"],
-            ),
-            FunctionStep(
-                "c",
-                fn=lambda ctx: {"c_out": ctx.prior_results["a_out"] + 100},
-                fields=["c_out"],
-                depends_on=["a"],
-            ),
-            FunctionStep(
-                "d",
-                fn=lambda ctx: {
-                    "d_out": ctx.prior_results["b_out"] + ctx.prior_results["c_out"]
-                },
-                fields=["d_out"],
-                depends_on=["b", "c"],
-            ),
-        ])
+        p = Pipeline(
+            [
+                FunctionStep("a", fn=lambda ctx: {"a_out": 1}, fields=["a_out"]),
+                FunctionStep(
+                    "b",
+                    fn=lambda ctx: {"b_out": ctx.prior_results["a_out"] + 10},
+                    fields=["b_out"],
+                    depends_on=["a"],
+                ),
+                FunctionStep(
+                    "c",
+                    fn=lambda ctx: {"c_out": ctx.prior_results["a_out"] + 100},
+                    fields=["c_out"],
+                    depends_on=["a"],
+                ),
+                FunctionStep(
+                    "d",
+                    fn=lambda ctx: {
+                        "d_out": ctx.prior_results["b_out"] + ctx.prior_results["c_out"]
+                    },
+                    fields=["d_out"],
+                    depends_on=["b", "c"],
+                ),
+            ]
+        )
 
         results, errors, cost = await p.execute([{"x": 0}], all_fields={})
         assert results[0] == {"a_out": 1, "b_out": 11, "c_out": 101, "d_out": 112}
@@ -221,15 +238,21 @@ class TestPipelineExecution:
     @pytest.mark.asyncio
     async def test_internal_fields_passed_between_steps(self):
         """Fields prefixed with __ are internal inter-step fields."""
-        p = Pipeline([
-            FunctionStep("search", fn=lambda ctx: {"__web_ctx": "search data"}, fields=["__web_ctx"]),
-            FunctionStep(
-                "analyze",
-                fn=lambda ctx: {"summary": f"Based on: {ctx.prior_results.get('__web_ctx', '')}"},
-                fields=["summary"],
-                depends_on=["search"],
-            ),
-        ])
+        p = Pipeline(
+            [
+                FunctionStep(
+                    "search", fn=lambda ctx: {"__web_ctx": "search data"}, fields=["__web_ctx"]
+                ),
+                FunctionStep(
+                    "analyze",
+                    fn=lambda ctx: {
+                        "summary": f"Based on: {ctx.prior_results.get('__web_ctx', '')}"
+                    },
+                    fields=["summary"],
+                    depends_on=["search"],
+                ),
+            ]
+        )
 
         results, errors, cost = await p.execute([{"q": "test"}], all_fields={})
         assert results[0]["summary"] == "Based on: search data"
@@ -244,9 +267,11 @@ class TestPipelineExecution:
 class TestCostAggregation:
     @pytest.mark.asyncio
     async def test_function_step_has_no_cost(self):
-        p = Pipeline([
-            FunctionStep("a", fn=_identity_fn(["f1"]), fields=["f1"]),
-        ])
+        p = Pipeline(
+            [
+                FunctionStep("a", fn=_identity_fn(["f1"]), fields=["f1"]),
+            ]
+        )
         results, errors, cost = await p.execute([{"x": 1}], all_fields={})
         assert cost.total_tokens == 0
         assert cost.steps == {}
@@ -266,14 +291,17 @@ class TestCostAggregation:
                 return StepResult(
                     values={"f1": "val"},
                     usage=UsageInfo(
-                        prompt_tokens=100, completion_tokens=50,
-                        total_tokens=150, model="test-model",
+                        prompt_tokens=100,
+                        completion_tokens=50,
+                        total_tokens=150,
+                        model="test-model",
                     ),
                 )
 
         p = Pipeline([UsageStep()])
         results, errors, cost = await p.execute(
-            [{"x": 1}, {"x": 2}], all_fields={},
+            [{"x": 1}, {"x": 2}],
+            all_fields={},
         )
         assert cost.total_prompt_tokens == 200
         assert cost.total_completion_tokens == 100

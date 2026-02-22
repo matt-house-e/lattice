@@ -16,7 +16,7 @@ A composable pipeline engine for structured data enrichment using LLMs. Define a
 
 ## Prerequisites
 
-- Python 3.9+
+- Python 3.10+
 - OpenAI API key
 
 ## Installation

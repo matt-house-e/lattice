@@ -5,8 +5,10 @@ Provides specific exception types for different failure modes
 with helpful error messages and context.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 
 class EnrichmentError(Exception):
@@ -18,7 +20,7 @@ class EnrichmentError(Exception):
         field: Field name involved (``None`` if not field-specific).
     """
 
-    def __init__(self, message: str, row_index: Optional[int] = None, field: Optional[str] = None):
+    def __init__(self, message: str, row_index: int | None = None, field: str | None = None):
         self.message = message
         self.row_index = row_index
         self.field = field
@@ -42,11 +44,13 @@ class FieldValidationError(EnrichmentError):
         - Missing required ``prompt`` key in a dict field spec.
         - Invalid ``type`` or ``enum`` values.
     """
+
     pass
 
 
 class ConfigurationError(EnrichmentError):
     """Raised when configuration is invalid."""
+
     pass
 
 
@@ -60,7 +64,7 @@ class StepError(EnrichmentError):
         step_name: Name of the step that failed (``None`` if unknown).
     """
 
-    def __init__(self, message: str, step_name: Optional[str] = None, **kwargs: Any):
+    def __init__(self, message: str, step_name: str | None = None, **kwargs: Any):
         self.step_name = step_name
         super().__init__(message, **kwargs)
 
@@ -73,6 +77,7 @@ class PipelineError(EnrichmentError):
         - A step's ``depends_on`` references a step that doesn't exist.
         - The dependency graph contains a cycle.
     """
+
     pass
 
 

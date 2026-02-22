@@ -13,7 +13,6 @@ from lattice.core.cache import (
     compute_cache_key,
 )
 
-
 # ---------------------------------------------------------------------------
 # CacheManager
 # ---------------------------------------------------------------------------
@@ -169,7 +168,14 @@ class TestComputeCacheKey:
 
 
 class _FakeLLMStep:
-    def __init__(self, name="llm", model="gpt-4.1-mini", temperature=0.2, system_prompt=None, system_prompt_header=None):
+    def __init__(
+        self,
+        name="llm",
+        model="gpt-4.1-mini",
+        temperature=0.2,
+        system_prompt=None,
+        system_prompt_header=None,
+    ):
         self.name = name
         self.model = model
         self.temperature = temperature

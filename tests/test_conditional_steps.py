@@ -15,7 +15,6 @@ from lattice.steps.base import StepContext, StepResult
 from lattice.steps.function import FunctionStep
 from lattice.steps.llm import LLMStep
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -71,16 +70,12 @@ class TestMutualExclusivity:
             )
 
     def test_function_step_allows_run_if_only(self):
-        step = FunctionStep(
-            "s", fn=lambda ctx: {}, fields=["f"], run_if=lambda row, prior: True
-        )
+        step = FunctionStep("s", fn=lambda ctx: {}, fields=["f"], run_if=lambda row, prior: True)
         assert step.run_if is not None
         assert step.skip_if is None
 
     def test_function_step_allows_skip_if_only(self):
-        step = FunctionStep(
-            "s", fn=lambda ctx: {}, fields=["f"], skip_if=lambda row, prior: True
-        )
+        step = FunctionStep("s", fn=lambda ctx: {}, fields=["f"], skip_if=lambda row, prior: True)
         assert step.skip_if is not None
         assert step.run_if is None
 
@@ -133,9 +128,7 @@ class TestShouldSkipRow:
 
     @pytest.mark.asyncio
     async def test_run_if_receives_row_data(self):
-        step = _MockStep(
-            "s", fields=["f"], run_if=lambda row, prior: row.get("country") == "US"
-        )
+        step = _MockStep("s", fields=["f"], run_if=lambda row, prior: row.get("country") == "US")
         assert await _should_skip_row(step, {"country": "US"}, {}) is False
         assert await _should_skip_row(step, {"country": "UK"}, {}) is True
 
@@ -209,69 +202,81 @@ class TestBuildSkipValues:
 class TestRunIfExecution:
     @pytest.mark.asyncio
     async def test_run_if_true_executes(self):
-        pipeline = Pipeline([
-            FunctionStep(
-                "upper",
-                fn=lambda ctx: {"name": ctx.row["company"].upper()},
-                fields=["name"],
-                run_if=lambda row, prior: True,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "upper",
+                    fn=lambda ctx: {"name": ctx.row["company"].upper()},
+                    fields=["name"],
+                    run_if=lambda row, prior: True,
+                )
+            ]
+        )
         result = await pipeline.run_async([{"company": "Acme"}])
         assert result.data[0]["name"] == "ACME"
 
     @pytest.mark.asyncio
     async def test_run_if_false_skips(self):
-        pipeline = Pipeline([
-            FunctionStep(
-                "upper",
-                fn=lambda ctx: {"name": ctx.row["company"].upper()},
-                fields=["name"],
-                run_if=lambda row, prior: False,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "upper",
+                    fn=lambda ctx: {"name": ctx.row["company"].upper()},
+                    fields=["name"],
+                    run_if=lambda row, prior: False,
+                )
+            ]
+        )
         result = await pipeline.run_async([{"company": "Acme"}])
         assert result.data[0]["name"] is None
 
     @pytest.mark.asyncio
     async def test_run_if_partial_rows(self):
-        pipeline = Pipeline([
-            FunctionStep(
-                "upper",
-                fn=lambda ctx: {"name": ctx.row["company"].upper()},
-                fields=["name"],
-                run_if=lambda row, prior: row["country"] == "US",
-            )
-        ])
-        result = await pipeline.run_async([
-            {"company": "Acme", "country": "US"},
-            {"company": "Beta", "country": "UK"},
-            {"company": "Gamma", "country": "US"},
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "upper",
+                    fn=lambda ctx: {"name": ctx.row["company"].upper()},
+                    fields=["name"],
+                    run_if=lambda row, prior: row["country"] == "US",
+                )
+            ]
+        )
+        result = await pipeline.run_async(
+            [
+                {"company": "Acme", "country": "US"},
+                {"company": "Beta", "country": "UK"},
+                {"company": "Gamma", "country": "US"},
+            ]
+        )
         assert result.data[0]["name"] == "ACME"
         assert result.data[1]["name"] is None
         assert result.data[2]["name"] == "GAMMA"
 
     @pytest.mark.asyncio
     async def test_run_if_using_prior_results(self):
-        pipeline = Pipeline([
-            FunctionStep(
-                "classify",
-                fn=lambda ctx: {"label": "relevant" if ctx.row["score"] > 5 else "irrelevant"},
-                fields=["label"],
-            ),
-            FunctionStep(
-                "detail",
-                fn=lambda ctx: {"info": "detailed"},
-                fields=["info"],
-                depends_on=["classify"],
-                run_if=lambda row, prior: prior.get("label") == "relevant",
-            ),
-        ])
-        result = await pipeline.run_async([
-            {"score": 10},
-            {"score": 1},
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "classify",
+                    fn=lambda ctx: {"label": "relevant" if ctx.row["score"] > 5 else "irrelevant"},
+                    fields=["label"],
+                ),
+                FunctionStep(
+                    "detail",
+                    fn=lambda ctx: {"info": "detailed"},
+                    fields=["info"],
+                    depends_on=["classify"],
+                    run_if=lambda row, prior: prior.get("label") == "relevant",
+                ),
+            ]
+        )
+        result = await pipeline.run_async(
+            [
+                {"score": 10},
+                {"score": 1},
+            ]
+        )
         assert result.data[0]["info"] == "detailed"
         assert result.data[1]["info"] is None
 
@@ -284,44 +289,52 @@ class TestRunIfExecution:
 class TestSkipIfExecution:
     @pytest.mark.asyncio
     async def test_skip_if_true_skips(self):
-        pipeline = Pipeline([
-            FunctionStep(
-                "upper",
-                fn=lambda ctx: {"name": ctx.row["company"].upper()},
-                fields=["name"],
-                skip_if=lambda row, prior: True,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "upper",
+                    fn=lambda ctx: {"name": ctx.row["company"].upper()},
+                    fields=["name"],
+                    skip_if=lambda row, prior: True,
+                )
+            ]
+        )
         result = await pipeline.run_async([{"company": "Acme"}])
         assert result.data[0]["name"] is None
 
     @pytest.mark.asyncio
     async def test_skip_if_false_executes(self):
-        pipeline = Pipeline([
-            FunctionStep(
-                "upper",
-                fn=lambda ctx: {"name": ctx.row["company"].upper()},
-                fields=["name"],
-                skip_if=lambda row, prior: False,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "upper",
+                    fn=lambda ctx: {"name": ctx.row["company"].upper()},
+                    fields=["name"],
+                    skip_if=lambda row, prior: False,
+                )
+            ]
+        )
         result = await pipeline.run_async([{"company": "Acme"}])
         assert result.data[0]["name"] == "ACME"
 
     @pytest.mark.asyncio
     async def test_skip_if_partial(self):
-        pipeline = Pipeline([
-            FunctionStep(
-                "upper",
-                fn=lambda ctx: {"name": ctx.row["company"].upper()},
-                fields=["name"],
-                skip_if=lambda row, prior: row["country"] != "US",
-            )
-        ])
-        result = await pipeline.run_async([
-            {"company": "Acme", "country": "US"},
-            {"company": "Beta", "country": "UK"},
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "upper",
+                    fn=lambda ctx: {"name": ctx.row["company"].upper()},
+                    fields=["name"],
+                    skip_if=lambda row, prior: row["country"] != "US",
+                )
+            ]
+        )
+        result = await pipeline.run_async(
+            [
+                {"company": "Acme", "country": "US"},
+                {"company": "Beta", "country": "UK"},
+            ]
+        )
         assert result.data[0]["name"] == "ACME"
         assert result.data[1]["name"] is None
 
@@ -335,14 +348,16 @@ class TestSkipValues:
     @pytest.mark.asyncio
     async def test_skipped_rows_get_none_without_specs(self):
         """FunctionStep with list fields → None for skipped rows."""
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=lambda ctx: {"a": 1, "b": 2},
-                fields=["a", "b"],
-                run_if=lambda row, prior: False,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"a": 1, "b": 2},
+                    fields=["a", "b"],
+                    run_if=lambda row, prior: False,
+                )
+            ]
+        )
         result = await pipeline.run_async([{"x": 1}])
         assert result.data[0]["a"] is None
         assert result.data[0]["b"] is None
@@ -356,7 +371,8 @@ class TestSkipValues:
             "score": FieldSpec(prompt="Rate score"),
         }
         step = _MockStep(
-            "s", fields=["market", "score"],
+            "s",
+            fields=["market", "score"],
             _field_specs=specs,
             run_if=lambda row, prior: False,
         )
@@ -377,14 +393,16 @@ class TestHooksSkipped:
         events: list[RowCompleteEvent] = []
         hooks = EnrichmentHooks(on_row_complete=lambda e: events.append(e))
 
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=lambda ctx: {"f": 1},
-                fields=["f"],
-                run_if=lambda row, prior: False,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"f": 1},
+                    fields=["f"],
+                    run_if=lambda row, prior: False,
+                )
+            ]
+        )
         await pipeline.run_async([{"x": 1}], hooks=hooks)
 
         assert len(events) == 1
@@ -397,14 +415,16 @@ class TestHooksSkipped:
         events: list[RowCompleteEvent] = []
         hooks = EnrichmentHooks(on_row_complete=lambda e: events.append(e))
 
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=lambda ctx: {"f": 1},
-                fields=["f"],
-                run_if=lambda row, prior: True,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"f": 1},
+                    fields=["f"],
+                    run_if=lambda row, prior: True,
+                )
+            ]
+        )
         await pipeline.run_async([{"x": 1}], hooks=hooks)
 
         assert len(events) == 1
@@ -415,14 +435,16 @@ class TestHooksSkipped:
         events: list[RowCompleteEvent] = []
         hooks = EnrichmentHooks(on_row_complete=lambda e: events.append(e))
 
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=lambda ctx: {"f": ctx.row["x"]},
-                fields=["f"],
-                run_if=lambda row, prior: row["x"] > 1,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"f": ctx.row["x"]},
+                    fields=["f"],
+                    run_if=lambda row, prior: row["x"] > 1,
+                )
+            ]
+        )
         await pipeline.run_async([{"x": 1}, {"x": 2}, {"x": 3}], hooks=hooks)
 
         assert len(events) == 3
@@ -452,14 +474,16 @@ class TestHooksSkipped:
 class TestUsageRowsSkipped:
     @pytest.mark.asyncio
     async def test_rows_skipped_counted(self):
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=lambda ctx: {"f": 1},
-                fields=["f"],
-                run_if=lambda row, prior: row["x"] > 1,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"f": 1},
+                    fields=["f"],
+                    run_if=lambda row, prior: row["x"] > 1,
+                )
+            ]
+        )
         result = await pipeline.run_async([{"x": 1}, {"x": 2}, {"x": 3}])
 
         usage = result.cost.steps.get("s")
@@ -468,14 +492,16 @@ class TestUsageRowsSkipped:
 
     @pytest.mark.asyncio
     async def test_all_skipped_creates_usage(self):
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=lambda ctx: {"f": 1},
-                fields=["f"],
-                run_if=lambda row, prior: False,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"f": 1},
+                    fields=["f"],
+                    run_if=lambda row, prior: False,
+                )
+            ]
+        )
         result = await pipeline.run_async([{"x": 1}, {"x": 2}])
 
         usage = result.cost.steps.get("s")
@@ -486,13 +512,15 @@ class TestUsageRowsSkipped:
     @pytest.mark.asyncio
     async def test_no_skipping_zero_rows_skipped(self):
         """A step with no predicates shouldn't report rows_skipped."""
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=lambda ctx: {"f": 1},
-                fields=["f"],
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"f": 1},
+                    fields=["f"],
+                )
+            ]
+        )
         result = await pipeline.run_async([{"x": 1}])
         # FunctionStep without caching won't produce usage at all
         # (no usage_list, no cache stats, no skips) — that's fine
@@ -509,14 +537,16 @@ class TestPredicateErrors:
         def bad_predicate(row, prior):
             raise ValueError("predicate boom")
 
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=lambda ctx: {"f": 1},
-                fields=["f"],
-                run_if=bad_predicate,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"f": 1},
+                    fields=["f"],
+                    run_if=bad_predicate,
+                )
+            ]
+        )
         result = await pipeline.run_async([{"x": 1}])
 
         assert result.has_errors
@@ -528,14 +558,16 @@ class TestPredicateErrors:
         async def bad_predicate(row, prior):
             raise RuntimeError("async predicate boom")
 
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=lambda ctx: {"f": 1},
-                fields=["f"],
-                skip_if=bad_predicate,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"f": 1},
+                    fields=["f"],
+                    skip_if=bad_predicate,
+                )
+            ]
+        )
         result = await pipeline.run_async([{"x": 1}])
 
         assert result.has_errors
@@ -554,18 +586,22 @@ class TestAsyncPredicates:
         async def is_us(row, prior):
             return row["country"] == "US"
 
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=lambda ctx: {"name": ctx.row["company"].upper()},
-                fields=["name"],
-                run_if=is_us,
-            )
-        ])
-        result = await pipeline.run_async([
-            {"company": "Acme", "country": "US"},
-            {"company": "Beta", "country": "UK"},
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"name": ctx.row["company"].upper()},
+                    fields=["name"],
+                    run_if=is_us,
+                )
+            ]
+        )
+        result = await pipeline.run_async(
+            [
+                {"company": "Acme", "country": "US"},
+                {"company": "Beta", "country": "UK"},
+            ]
+        )
         assert result.data[0]["name"] == "ACME"
         assert result.data[1]["name"] is None
 
@@ -574,18 +610,22 @@ class TestAsyncPredicates:
         async def is_low_priority(row, prior):
             return row.get("priority") == "low"
 
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=lambda ctx: {"f": "done"},
-                fields=["f"],
-                skip_if=is_low_priority,
-            )
-        ])
-        result = await pipeline.run_async([
-            {"priority": "high"},
-            {"priority": "low"},
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=lambda ctx: {"f": "done"},
+                    fields=["f"],
+                    skip_if=is_low_priority,
+                )
+            ]
+        )
+        result = await pipeline.run_async(
+            [
+                {"priority": "high"},
+                {"priority": "low"},
+            ]
+        )
         assert result.data[0]["f"] == "done"
         assert result.data[1]["f"] is None
 
@@ -599,24 +639,28 @@ class TestMultiStepIntegration:
     @pytest.mark.asyncio
     async def test_skipped_values_visible_to_downstream(self):
         """Downstream steps see None/defaults from skipped rows in prior_results."""
-        pipeline = Pipeline([
-            FunctionStep(
-                "classify",
-                fn=lambda ctx: {"label": "relevant"},
-                fields=["label"],
-                run_if=lambda row, prior: row["score"] > 5,
-            ),
-            FunctionStep(
-                "detail",
-                fn=lambda ctx: {"info": f"label was {ctx.prior_results.get('label')}"},
-                fields=["info"],
-                depends_on=["classify"],
-            ),
-        ])
-        result = await pipeline.run_async([
-            {"score": 10},
-            {"score": 1},
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "classify",
+                    fn=lambda ctx: {"label": "relevant"},
+                    fields=["label"],
+                    run_if=lambda row, prior: row["score"] > 5,
+                ),
+                FunctionStep(
+                    "detail",
+                    fn=lambda ctx: {"info": f"label was {ctx.prior_results.get('label')}"},
+                    fields=["info"],
+                    depends_on=["classify"],
+                ),
+            ]
+        )
+        result = await pipeline.run_async(
+            [
+                {"score": 10},
+                {"score": 1},
+            ]
+        )
         # Row 0: classify ran → label="relevant" → detail sees it
         assert result.data[0]["info"] == "label was relevant"
         # Row 1: classify skipped → label=None → detail sees None
@@ -624,25 +668,29 @@ class TestMultiStepIntegration:
 
     @pytest.mark.asyncio
     async def test_both_steps_conditional(self):
-        pipeline = Pipeline([
-            FunctionStep(
-                "step1",
-                fn=lambda ctx: {"a": ctx.row["x"] * 2},
-                fields=["a"],
-                run_if=lambda row, prior: row["x"] > 0,
-            ),
-            FunctionStep(
-                "step2",
-                fn=lambda ctx: {"b": (ctx.prior_results.get("a") or 0) + 1},
-                fields=["b"],
-                depends_on=["step1"],
-                skip_if=lambda row, prior: prior.get("a") is None,
-            ),
-        ])
-        result = await pipeline.run_async([
-            {"x": 5},
-            {"x": -1},
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "step1",
+                    fn=lambda ctx: {"a": ctx.row["x"] * 2},
+                    fields=["a"],
+                    run_if=lambda row, prior: row["x"] > 0,
+                ),
+                FunctionStep(
+                    "step2",
+                    fn=lambda ctx: {"b": (ctx.prior_results.get("a") or 0) + 1},
+                    fields=["b"],
+                    depends_on=["step1"],
+                    skip_if=lambda row, prior: prior.get("a") is None,
+                ),
+            ]
+        )
+        result = await pipeline.run_async(
+            [
+                {"x": 5},
+                {"x": -1},
+            ]
+        )
         assert result.data[0]["a"] == 10
         assert result.data[0]["b"] == 11
         assert result.data[1]["a"] is None
@@ -651,24 +699,28 @@ class TestMultiStepIntegration:
     @pytest.mark.asyncio
     async def test_unconditional_step_unaffected(self):
         """Steps without predicates still work normally alongside conditional steps."""
-        pipeline = Pipeline([
-            FunctionStep(
-                "always",
-                fn=lambda ctx: {"a": 1},
-                fields=["a"],
-            ),
-            FunctionStep(
-                "sometimes",
-                fn=lambda ctx: {"b": 2},
-                fields=["b"],
-                depends_on=["always"],
-                run_if=lambda row, prior: row["x"] > 0,
-            ),
-        ])
-        result = await pipeline.run_async([
-            {"x": 1},
-            {"x": -1},
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "always",
+                    fn=lambda ctx: {"a": 1},
+                    fields=["a"],
+                ),
+                FunctionStep(
+                    "sometimes",
+                    fn=lambda ctx: {"b": 2},
+                    fields=["b"],
+                    depends_on=["always"],
+                    run_if=lambda row, prior: row["x"] > 0,
+                ),
+            ]
+        )
+        result = await pipeline.run_async(
+            [
+                {"x": 1},
+                {"x": -1},
+            ]
+        )
         assert result.data[0]["a"] == 1
         assert result.data[0]["b"] == 2
         assert result.data[1]["a"] == 1
@@ -698,14 +750,16 @@ class TestCachingWithConditionals:
             cache_dir=str(tmp_path),
         )
 
-        pipeline = Pipeline([
-            FunctionStep(
-                "s",
-                fn=counting_fn,
-                fields=["f"],
-                run_if=lambda row, prior: row["x"] > 0,
-            )
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep(
+                    "s",
+                    fn=counting_fn,
+                    fields=["f"],
+                    run_if=lambda row, prior: row["x"] > 0,
+                )
+            ]
+        )
 
         # First run
         result1 = await pipeline.run_async(

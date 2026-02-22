@@ -10,7 +10,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from ..utils.logger import get_logger
 
@@ -104,7 +104,7 @@ class CheckpointManager:
             logger.error(f"Failed to save checkpoint: {e}")
             return False
 
-    def load(self, data_identifier: str, category: str) -> Optional[CheckpointData]:
+    def load(self, data_identifier: str, category: str) -> CheckpointData | None:
         """Load checkpoint if enabled, auto_resume is on, file exists, and category matches."""
         if not self._enabled or not self._auto_resume:
             return None
