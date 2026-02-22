@@ -1,4 +1,4 @@
-"""Pydantic schemas for the Lattice pipeline."""
+"""Pydantic schemas for the Accrue pipeline."""
 
 from .base import CostSummary, StepUsage, UsageInfo
 from .enrichment import EnrichmentResult

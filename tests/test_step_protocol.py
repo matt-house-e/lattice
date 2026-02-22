@@ -2,8 +2,8 @@
 
 import pytest
 
-from lattice.schemas.base import UsageInfo
-from lattice.steps.base import Step, StepContext, StepResult
+from accrue.schemas.base import UsageInfo
+from accrue.steps.base import Step, StepContext, StepResult
 
 # -- StepContext ---------------------------------------------------------
 

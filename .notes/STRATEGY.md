@@ -1,4 +1,4 @@
-# Lattice Strategy & Go-to-Market
+# Accrue Strategy & Go-to-Market
 
 **Last Updated:** 2026-02-03
 
@@ -23,7 +23,7 @@
 | **Open Source** | Beton | Web UI only, not a Python library |
 | **LLM Libraries** | Instructor, LangChain | Not DataFrame/enrichment focused |
 
-**Lattice fills:** A developer-friendly Python library for LLM-powered DataFrame enrichment. "Clay for developers."
+**Accrue fills:** A developer-friendly Python library for LLM-powered DataFrame enrichment. "Clay for developers."
 
 ### Competitive Advantage
 
@@ -38,7 +38,7 @@
 
 ```
 OPEN SOURCE (Apache 2.0)
-├── Lattice Core Library
+├── Accrue Core Library
 ├── Maximum distribution, all use cases
 └── Builds brand and credibility
 
@@ -81,7 +81,7 @@ PAID PRODUCTS (Vertical)
 - [ ] dev.to, Reddit (r/Python, r/datascience, r/MachineLearning)
 
 **Week 4: Hacker News**
-- Post: "Show HN: Lattice - Enrich your data with LLMs in 4 lines of Python"
+- Post: "Show HN: Accrue - Enrich your data with LLMs in 4 lines of Python"
 - Monday/Tuesday 8-10 AM Pacific
 - Respond to ALL comments for 6+ hours
 
@@ -92,7 +92,7 @@ PAID PRODUCTS (Vertical)
 **Goal:** $2k-5k MRR, 50 paying customers
 
 **Cloud-Hosted Launch**
-- `app.lattice.dev` or similar
+- `app.accrue.dev` or similar
 - User brings own API key initially
 - Pricing: Free (100 rows) → $29 (5k rows) → $99 (25k rows)
 
@@ -153,7 +153,7 @@ PAID PRODUCT
                   │
                   ▼
 ┌───────────────────────────────────────────┐
-│         LATTICE CORE (OSS)                │
+│         ACCRUE CORE (OSS)                 │
 │  Enrichment, Graph, Provenance, Cross-Row │
 └───────────────────────────────────────────┘
 ```

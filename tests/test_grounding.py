@@ -11,13 +11,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
-from lattice import GroundingConfig, LLMStep, Pipeline
-from lattice.core.cache import _compute_step_cache_key
-from lattice.core.exceptions import PipelineError, StepError
-from lattice.schemas.grounding import Citation, GroundingConfig
-from lattice.steps.base import StepContext, StepResult
-from lattice.steps.providers.base import LLMResponse
-from lattice.steps.providers.openai import OpenAIClient
+from accrue import GroundingConfig, LLMStep, Pipeline
+from accrue.core.cache import _compute_step_cache_key
+from accrue.core.exceptions import PipelineError, StepError
+from accrue.schemas.grounding import Citation, GroundingConfig
+from accrue.steps.base import StepContext, StepResult
+from accrue.steps.providers.base import LLMResponse
+from accrue.steps.providers.openai import OpenAIClient
 
 
 # ============================================================================
@@ -443,9 +443,9 @@ class TestSourcesField:
 
 class TestExports:
     def test_grounding_config_importable(self):
-        from lattice import GroundingConfig
+        from accrue import GroundingConfig
         assert GroundingConfig is not None
 
     def test_grounding_config_in_all(self):
-        import lattice
-        assert "GroundingConfig" in lattice.__all__
+        import accrue
+        assert "GroundingConfig" in accrue.__all__

@@ -6,12 +6,12 @@
 
 ## Overview
 
-Lattice v0.3 replaces the monolithic chain model with a composable pipeline of steps. Each step runs across all rows (column-oriented) before the next step starts. Steps declare dependencies; independent steps run in parallel.
+Accrue v0.3 replaces the monolithic chain model with a composable pipeline of steps. Each step runs across all rows (column-oriented) before the next step starts. Steps declare dependencies; independent steps run in parallel.
 
 ## Step Protocol
 
 ```python
-# lattice/steps/base.py
+# accrue/steps/base.py
 
 @dataclass(frozen=True)
 class StepContext:
@@ -45,14 +45,14 @@ class Step(Protocol):
 ## Pipeline
 
 ```python
-# lattice/pipeline/pipeline.py
+# accrue/pipeline/pipeline.py
 
 class Pipeline:
     def __init__(self, steps: list[Step]): ...
     def run(self, data, config=None) -> PipelineResult: ...         # DataFrame or list[dict]
     async def run_async(self, data, config=None) -> PipelineResult: ...
     def runner(self, config=None) -> Enricher: ...
-    def clear_cache(self, step=None, cache_dir=".lattice") -> int: ...
+    def clear_cache(self, step=None, cache_dir=".accrue") -> int: ...
     async def execute(self, rows, all_fields, config, ...) -> tuple[list[dict], list[RowError], CostSummary]: ...
 ```
 
@@ -80,7 +80,7 @@ Fields prefixed with `__` (e.g. `__web_context`) are used for inter-step communi
 
 ## Built-in Steps
 
-### LLMStep (`lattice/steps/llm.py`)
+### LLMStep (`accrue/steps/llm.py`)
 
 ```python
 class LLMStep:
@@ -154,7 +154,7 @@ When fields is a dict, LLMStep uses specs directly in `_build_system_message()` 
 - On validation error: appends error to conversation, retries (sends error back to LLM)
 - Returns `StepResult` with values filtered to only this step's declared fields
 
-### FunctionStep (`lattice/steps/function.py`)
+### FunctionStep (`accrue/steps/function.py`)
 
 ```python
 class FunctionStep:
@@ -178,7 +178,7 @@ class FunctionStep:
 - `cache=False` — disables caching for non-deterministic functions
 - `run_if` / `skip_if` — per-row predicates for conditional execution (Phase 6B)
 
-### LLMClient Protocol (`lattice/steps/providers/base.py`) — Phase 2
+### LLMClient Protocol (`accrue/steps/providers/base.py`) — Phase 2
 
 ```python
 class LLMClient(Protocol):
@@ -200,17 +200,17 @@ class LLMResponse:
 
 **Shipped adapters:**
 - `OpenAIClient` (~30 lines) — default. Covers OpenAI, DeepSeek, Groq, Together, Fireworks, Ollama, vLLM, Mistral, LM Studio via `base_url`.
-- `AnthropicClient` (~30 lines) — optional extra: `pip install lattice[anthropic]`
-- `GoogleClient` (~30 lines) — optional extra: `pip install lattice[google]`
+- `AnthropicClient` (~30 lines) — optional extra: `pip install accrue[anthropic]`
+- `GoogleClient` (~30 lines) — optional extra: `pip install accrue[google]`
 
-**Import:** `from lattice.providers import OpenAIClient, AnthropicClient, GoogleClient`
+**Import:** `from accrue.providers import OpenAIClient, AnthropicClient, GoogleClient`
 
 ### Web Search Utility (Phase 5)
 
-**`web_search()` factory** (`lattice/utils/web_search.py`) — Convenience wrapper around OpenAI Responses API. Returns async callable for FunctionStep:
+**`web_search()` factory** (`accrue/utils/web_search.py`) — Convenience wrapper around OpenAI Responses API. Returns async callable for FunctionStep:
 
 ```python
-from lattice import Pipeline, FunctionStep, LLMStep, web_search
+from accrue import Pipeline, FunctionStep, LLMStep, web_search
 
 Pipeline([
     FunctionStep("research",
@@ -238,7 +238,7 @@ Pipeline([
 ])
 ```
 
-No Tavily dependency. No provider abstraction. No "waterfall resolution." Users write a function; Lattice orchestrates it.
+No Tavily dependency. No provider abstraction. No "waterfall resolution." Users write a function; Accrue orchestrates it.
 
 **Web search with citations (recommended pattern):**
 
@@ -292,7 +292,7 @@ Pipeline([
 **Phase 2 redesign:** Pipeline becomes the primary public interface. Enricher becomes an internal runner.
 
 ```python
-# lattice/pipeline/pipeline.py
+# accrue/pipeline/pipeline.py
 
 class Pipeline:
     def __init__(self, steps: list[Step]): ...
@@ -318,7 +318,7 @@ class Pipeline:
 ### Enricher (internal runner)
 
 ```python
-# lattice/core/enricher.py — internal, not in public API
+# accrue/core/enricher.py — internal, not in public API
 
 class Enricher:
     def __init__(self, pipeline: Pipeline, config: EnrichmentConfig = None): ...
@@ -348,9 +348,9 @@ No FieldManager parameter. No category parameter. Field specs come from steps.
 - `python-dotenv>=1.0.0`
 
 ### Optional Extras (Phase 2)
-- `anthropic>=1.0.0` — `pip install lattice[anthropic]`
-- `google-genai>=1.0.0` — `pip install lattice[google]`
-- `pip install lattice[all]` — both
+- `anthropic>=1.0.0` — `pip install accrue[anthropic]`
+- `google-genai>=1.0.0` — `pip install accrue[google]`
+- `pip install accrue[all]` — both
 
 ## Checkpoint Model
 
@@ -373,7 +373,7 @@ Optional validation at `run()` time:
 
 ## System Prompt — Dynamic Prompt Builder (Phase 3)
 
-Implemented in `lattice/steps/prompt_builder.py`. Follows OpenAI GPT-4.1 cookbook: **markdown headers for sections, XML tags for data boundaries**. JSON in prompts performs poorly per OpenAI's long-context testing.
+Implemented in `accrue/steps/prompt_builder.py`. Follows OpenAI GPT-4.1 cookbook: **markdown headers for sections, XML tags for data boundaries**. JSON in prompts performs poorly per OpenAI's long-context testing.
 
 **Structure:**
 ```markdown
@@ -432,7 +432,7 @@ You are a structured data enrichment engine...
 
 ### Structured Outputs (Phase 5)
 
-Migrated from `response_format={"type": "json_object"}` (legacy) to `{"type": "json_schema", "strict": true}` for OpenAI. Dynamically builds Pydantic model from 7-key field specs via `lattice/steps/schema_builder.py`.
+Migrated from `response_format={"type": "json_object"}` (legacy) to `{"type": "json_schema", "strict": true}` for OpenAI. Dynamically builds Pydantic model from 7-key field specs via `accrue/steps/schema_builder.py`.
 
 **Auto-detection logic:**
 - Native OpenAI + dict fields → `json_schema` + `strict: true` (auto-enabled)
@@ -442,7 +442,7 @@ Migrated from `response_format={"type": "json_object"}` (legacy) to `{"type": "j
 - `list[str]` fields → `json_object` (no specs to build schema from)
 - `structured_outputs=True/False` → explicit override
 
-**Schema builder** (`lattice/steps/schema_builder.py`):
+**Schema builder** (`accrue/steps/schema_builder.py`):
 - `build_response_model(field_specs)` → `type[BaseModel]` via `pydantic.create_model()`
 - Type mapping: `String→str, Number→float, Boolean→bool, Date→str, List[String]→list[str], JSON→dict[str,Any]`
 - Enum fields → `Literal["val1", "val2", ...]`
@@ -455,7 +455,7 @@ Research: `docs/research/prompt-engineering.md`
 
 ### Simple: One LLM step (primary API)
 ```python
-from lattice import Pipeline, LLMStep
+from accrue import Pipeline, LLMStep
 
 pipeline = Pipeline([
     LLMStep("analyze", fields={
@@ -469,7 +469,7 @@ result = pipeline.run(df)
 
 ### Multi-step with dependencies
 ```python
-from lattice import Pipeline, LLMStep, FunctionStep
+from accrue import Pipeline, LLMStep, FunctionStep
 
 async def search_company(ctx):
     results = await my_search(ctx.row["name"])
@@ -506,7 +506,7 @@ result = pipeline.run(df)
 
 ### Power user: reusable runner
 ```python
-from lattice import EnrichmentConfig
+from accrue import EnrichmentConfig
 
 runner = pipeline.runner(config=EnrichmentConfig(
     max_workers=10,
@@ -517,7 +517,7 @@ result = await runner.run_async(df)
 
 ### Team with CSV field definitions
 ```python
-from lattice.data import load_fields
+from accrue.data import load_fields
 
 fields = load_fields("fields.csv", category="business_analysis")
 pipeline = Pipeline([LLMStep("analyze", fields=fields)])
@@ -545,8 +545,8 @@ Merged in #32. All issues closed: #19, #20, #23, #24, #25, #26, #27, #28, #29.
 The prompt engineering layer is the core of enrichment quality. This phase rebuilt it from research.
 
 ### What was built
-1. **7-key field spec validation** — `FieldSpec` Pydantic model (`lattice/schemas/field_spec.py`) with `extra="forbid"`. Enforced on LLMStep construction via `_normalize_field_specs()`. Rejects unknown keys. `prompt` required, all others optional.
-2. **Dynamic system prompt builder** — `lattice/steps/prompt_builder.py`. Markdown headers + XML data boundaries (OpenAI GPT-4.1 cookbook). Only describes keys actually present across this step's fields. Static content at top (enables prompt caching), variable data at bottom, sandwich pattern reminder at end.
+1. **7-key field spec validation** — `FieldSpec` Pydantic model (`accrue/schemas/field_spec.py`) with `extra="forbid"`. Enforced on LLMStep construction via `_normalize_field_specs()`. Rejects unknown keys. `prompt` required, all others optional.
+2. **Dynamic system prompt builder** — `accrue/steps/prompt_builder.py`. Markdown headers + XML data boundaries (OpenAI GPT-4.1 cookbook). Only describes keys actually present across this step's fields. Static content at top (enables prompt caching), variable data at bottom, sandwich pattern reminder at end.
 3. **`default` enforcement in Python** — `LLMStep._apply_defaults()` replaces refusal language ("Unable to determine", "N/A", etc.) with field's `default` value post-extraction. Uses `model_fields_set` to distinguish "default not set" from "default=None".
 4. **Default model → `gpt-4.1-mini`** — Changed from `gpt-4.1-nano`. Temperature fallback → 0.2 (was 0.5). Nano stays available per-step.
 5. **CSV loader update** — Rewritten for new 7-key format. Backward-compatible: legacy `Instructions`/`Guidance` columns concatenated into `prompt`, `Data_Type` → `Type` fallback. Fixed `get_category_fields()` bug (was stripping examples).
@@ -569,14 +569,14 @@ Input-hash cache for iterative development and large dataset resilience. Without
 Both can be enabled independently. For development: enable caching. For production with large datasets: enable both.
 
 **SQLite backend (zero dependencies):**
-`sqlite3` is Python stdlib. Benchmarks show 35% faster reads than filesystem JSON (sqlite.org), handles thousands of entries trivially, atomic concurrent writes via WAL mode. Single `.lattice/cache.db` file. Industry precedent: requests-cache, DiskCache (used by DSPy), and Instructor all use SQLite for local caching.
+`sqlite3` is Python stdlib. Benchmarks show 35% faster reads than filesystem JSON (sqlite.org), handles thousands of entries trivially, atomic concurrent writes via WAL mode. Single `.accrue/cache.db` file. Industry precedent: requests-cache, DiskCache (used by DSPy), and Instructor all use SQLite for local caching.
 
 **FunctionStep caching via `cache_version`:**
 FunctionSteps are cacheable with an explicit `cache_version` string. Users bump the version when function logic changes. `cache=False` disables caching for non-deterministic functions.
 
 ### Scope
 1. **Input-hash cache key** — `SHA256(canonical_json(step_name + row_data + prior_results + field_specs + model + temperature + system_prompt_config))`. Canonical JSON (sorted keys) for determinism. Changing a field's prompt, enum, or type auto-invalidates (Instructor pattern).
-2. **SQLite backend** — Single `.lattice/cache.db` file. WAL mode + `synchronous=NORMAL`. Zero new dependencies (`sqlite3` is stdlib).
+2. **SQLite backend** — Single `.accrue/cache.db` file. WAL mode + `synchronous=NORMAL`. Zero new dependencies (`sqlite3` is stdlib).
 3. **TTL-based expiry** — `cache_ttl` already in `EnrichmentConfig` (unused), wire it up. Lazy expiry on read + periodic cleanup.
 4. **Per-step control** — `LLMStep(..., cache=False)` to bypass. `FunctionStep(..., cache_version="v1")` for versioned caching.
 5. **Pipeline-level control** — `EnrichmentConfig(enable_caching=True)` (already exists, wire it up). `pipeline.clear_cache()` for manual invalidation.
@@ -639,7 +639,7 @@ PRAGMA cache_size=-8000;          -- 8MB in-memory page cache
 EnrichmentConfig(
     enable_caching=True,          # Existing, wire it up
     cache_ttl=3600,               # Existing, wire it up
-    cache_dir=".lattice",         # NEW — directory for cache.db
+    cache_dir=".accrue",         # NEW — directory for cache.db
     checkpoint_interval=100,      # NEW — save partial progress every N rows
 )
 
@@ -663,14 +663,14 @@ result.cost.steps["analyze"].cache_hit_rate  # 0.95
 EnrichmentConfig.for_development()
     # Adds:
     enable_caching=True          # Avoid re-running during iteration
-    cache_dir=".lattice"
+    cache_dir=".accrue"
 
 EnrichmentConfig.for_production()
     # Adds:
     enable_caching=True
     enable_checkpointing=True    # Existing
     checkpoint_interval=100      # Partial step progress for large datasets
-    cache_dir=".lattice"
+    cache_dir=".accrue"
 ```
 
 ### Integration Points
@@ -721,11 +721,11 @@ This makes pandas a convenience dependency rather than a hard requirement for th
 
 ### What was built
 
-1. **CacheManager** (`lattice/core/cache.py`) — SQLite-backed cache with WAL mode, lazy connection, TTL expiry on read, cleanup method. Contains `compute_cache_key()` (SHA-256 of canonical JSON) and `_compute_step_cache_key()` (duck-types LLMStep vs FunctionStep).
+1. **CacheManager** (`accrue/core/cache.py`) — SQLite-backed cache with WAL mode, lazy connection, TTL expiry on read, cleanup method. Contains `compute_cache_key()` (SHA-256 of canonical JSON) and `_compute_step_cache_key()` (duck-types LLMStep vs FunctionStep).
 2. **Cache integration in `_execute_step()`** — Cache check before `step.run()`, cache store after. `step_cache_enabled` flag from `cache_manager is not None and getattr(step, 'cache', True)`.
 3. **Cache stats** — `StepUsage.cache_hits`, `cache_misses`, `cache_hit_rate` property. Flows into `PipelineResult.cost.steps["name"]`.
 4. **Per-step control** — `LLMStep(..., cache=True)` and `FunctionStep(..., cache=True, cache_version="v1")`. `cache=False` bypasses.
-5. **Config wiring** — `cache_dir=".lattice"`, `checkpoint_interval=0` added to `EnrichmentConfig`. Presets updated: `for_development()` enables caching, `for_production()` enables caching + `checkpoint_interval=100`.
+5. **Config wiring** — `cache_dir=".accrue"`, `checkpoint_interval=0` added to `EnrichmentConfig`. Presets updated: `for_development()` enables caching, `for_production()` enables caching + `checkpoint_interval=100`.
 6. **`list[dict]` input** — `Pipeline.run()` / `run_async()` accept `pd.DataFrame | list[dict]`. Output type matches input type. Internal fields (`__` prefixed) filtered from list output.
 7. **`Pipeline.clear_cache()`** — Full and per-step invalidation.
 8. **Checkpoint interval** — `checkpoint_interval=N` saves partial step progress every N rows via `asyncio.as_completed` pattern. Enricher wires callback to `CheckpointManager.save_step()`.
@@ -741,17 +741,17 @@ Four features closing competitive gaps vs. Instructor, Clay, and LangChain.
 
 2. **Lifecycle hooks (#30)** — `EnrichmentHooks` dataclass with 5 typed event callbacks: `on_pipeline_start`, `on_pipeline_end`, `on_step_start`, `on_step_end`, `on_row_complete`. Passed to `run()`/`run_async()`. Sync + async hooks. Hook errors caught + logged. Events include timing, usage, cache status, errors. Subsumes #11 (streaming) via `on_row_complete`.
 
-3. **Structured outputs migration** — Auto-enabled `json_schema` + `strict: true` for native OpenAI with dict field specs. Dynamic Pydantic model built from FieldSpec definitions (`lattice/steps/schema_builder.py`). Auto-off for base_url, non-OpenAI, custom schema, list fields. `structured_outputs=True/False` override. `StepResult.metadata["structured_outputs"]` flag.
+3. **Structured outputs migration** — Auto-enabled `json_schema` + `strict: true` for native OpenAI with dict field specs. Dynamic Pydantic model built from FieldSpec definitions (`accrue/steps/schema_builder.py`). Auto-off for base_url, non-OpenAI, custom schema, list fields. `structured_outputs=True/False` override. `StepResult.metadata["structured_outputs"]` flag.
 
 4. **`web_search()` utility (#35)** — Factory wrapping OpenAI Responses API. `web_search("Research {company}: market")` returns async callable for FunctionStep. Template formatting from row + prior_results. Citation extraction. Graceful degradation on API errors.
 
 ## Phase 6A: Ship (Epic #18)
 
-Minimum viable distribution. Get Lattice into users' hands.
+Minimum viable distribution. Get Accrue into users' hands.
 
 - **Working examples** — 3-4 runnable scripts with sample data: simple enrichment, multi-step with deps, web search two-step pattern, Anthropic/Google provider usage
 - **README rewrite** — Real examples, install instructions, quick start
-- **PyPI publish** — `pip install lattice-enrichment`
+- **PyPI publish** — `pip install accrue`
 - **#21 docs fix** — Update github-standards.md for v0.3 components (quick win)
 
 ## Phase 6B: Power User Features — IN PROGRESS
@@ -765,13 +765,13 @@ Minimum viable distribution. Get Lattice into users' hands.
 - **Waterfall enrichment pattern** — Utility for try-source-A, fall-back-to-B
 - **Intra-batch deduplication** — Deduplicate identical rows before API call
 - **Chunked execution** — `chunk_size=N` for memory-bounded processing
-- **CLI** — `lattice run --csv data.csv --fields fields.csv`
+- **CLI** — `accrue run --csv data.csv --fields fields.csv`
 
 ## Backlog Triage (Feb 2026)
 
 | # | Issue | Decision | Reasoning |
 |---|-------|----------|-----------|
-| **#13** | Eval suite | **Closed (won't-fix)** | Conflicts with design principle: "Evals are user-level, not library-level." Lattice exposes data; users run their own evals. |
+| **#13** | Eval suite | **Closed (won't-fix)** | Conflicts with design principle: "Evals are user-level, not library-level." Accrue exposes data; users run their own evals. |
 | **#11** | Streaming output | **Closed** | Subsumed by lifecycle hooks (`EnrichmentHooks.on_row_complete`). |
 | **#12** | Sources/provenance | **Kept, deprioritized** | Partially addressed by web search two-step pattern (`sources` column). Full provenance is a post-launch differentiator per TECHNICAL-VISION.md. |
 
@@ -786,7 +786,7 @@ Minimum viable distribution. Get Lattice into users' hands.
 | Drop waterfall resolution | Feb 2026 | Source priority is user logic (domain-specific), not framework logic. |
 | LLMClient protocol + shipped adapters | Feb 2026 | OpenAI default, Anthropic/Google as optional extras (~30 lines each). Covers top 3 providers + all OpenAI-compatible via base_url. |
 | No litellm dependency | Feb 2026 | Too heavy (~30 transitive deps). Protocol + thin adapters achieves the same with zero required deps. |
-| No langfuse/eval dependency | Feb 2026 | Evals are application-level. Lattice exposes hooks for observability tools to plug in. |
+| No langfuse/eval dependency | Feb 2026 | Evals are application-level. Accrue exposes hooks for observability tools to plug in. |
 | Phase 2 = Resilience + API redesign | Feb 2026 | Foundation gaps + API simplification must happen before PyPI publish. |
 | Default model → gpt-4.1-mini | Feb 2026 | Nano too limited: poor complex retrieval, no web search support, hallucination risk with structured outputs. Mini is "standout star," matches GPT-4o at 83% cheaper. Users can still set nano per-step for simple classification. |
 | 7-key field spec (drop `instructions`) | Feb 2026 | Research-backed: `prompt`, `type`, `format`, `enum`, `examples`, `bad_examples`, `default`. Merged `instructions`/`guidance` into `prompt` — other keys already cover structured concerns. |
@@ -801,7 +801,7 @@ Minimum viable distribution. Get Lattice into users' hands.
 | `list[dict]` input support | Feb 2026 | Internals already work on `list[dict]`. Accept dicts directly — serves server contexts, test code, and Polars users (`.to_dicts()`). |
 | No native Polars support (for now) | Feb 2026 | 77% of Python data practitioners use pandas. Zero LLM tools support Polars natively. `list[dict]` input covers Polars users. Revisit post-launch. |
 | Chunked execution is separate from Phase 4 | Feb 2026 | Changes execution model from column-oriented to chunk-oriented. Medium effort, depends on caching. Own issue in Phase 5B. |
-| Keep pandas as base dependency | Feb 2026 | Lattice's users are pandas users (enrichment workflows, Jupyter, CSV origins). Making pandas optional adds complexity for minimal benefit. |
+| Keep pandas as base dependency | Feb 2026 | Accrue's users are pandas users (enrichment workflows, Jupyter, CSV origins). Making pandas optional adds complexity for minimal benefit. |
 | Hooks on `run()`, not config or Pipeline | Feb 2026 | Config is serializable data; hooks are callables. Different runs may want different hooks. |
 | 5 hooks with typed event dataclasses | Feb 2026 | `on_pipeline_start/end`, `on_step_start/end`, `on_row_complete`. `on_row_error` merged into `on_row_complete` (check `event.error`). Simpler API. |
 | Hook errors silently caught + logged | Feb 2026 | Observability failures must not crash data pipelines. `except Exception` catches; `BaseException` propagates. |

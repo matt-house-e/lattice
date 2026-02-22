@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-This directory contains lightweight ADRs for Lattice's major architectural decisions. Each record captures the context, decision, and rejected alternatives in a single paragraph-style format.
+This directory contains lightweight ADRs for Accrue's major architectural decisions. Each record captures the context, decision, and rejected alternatives in a single paragraph-style format.
 
 ## Template
 

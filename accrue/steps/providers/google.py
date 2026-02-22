@@ -1,4 +1,4 @@
-"""Google Gemini provider adapter — optional extra: pip install lattice[google]."""
+"""Google Gemini provider adapter — optional extra: pip install accrue[google]."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class GoogleClient:
     """Adapter for Google's Gemini models.
 
-    Requires: pip install lattice[google]
+    Requires: pip install accrue[google]
 
     Supports the ``google_search`` grounding tool.  When grounding is active,
     structured outputs (``response_json_schema``) are disabled because the
@@ -32,7 +32,7 @@ class GoogleClient:
             try:
                 from google import genai
             except ImportError:
-                raise ImportError("google-genai package required: pip install lattice[google]")
+                raise ImportError("google-genai package required: pip install accrue[google]")
             key = self._api_key or os.environ.get("GOOGLE_API_KEY")
             self._client = genai.Client(api_key=key)
         return self._client
@@ -136,7 +136,7 @@ class GoogleClient:
 
 
 def _translate_tools(tools: list[dict[str, Any]], types: Any) -> list[Any]:
-    """Translate generic Lattice tool dicts to Gemini Tool objects."""
+    """Translate generic Accrue tool dicts to Gemini Tool objects."""
     gemini_tools: list[Any] = []
     for tool in tools:
         if tool.get("type") == "web_search":

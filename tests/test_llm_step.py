@@ -9,13 +9,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from lattice.core.config import EnrichmentConfig
-from lattice.core.exceptions import StepError
-from lattice.schemas.base import UsageInfo
-from lattice.schemas.field_spec import FieldSpec
-from lattice.steps.base import Step, StepContext, StepResult
-from lattice.steps.llm import LLMStep
-from lattice.steps.providers.base import LLMAPIError, LLMResponse
+from accrue.core.config import EnrichmentConfig
+from accrue.core.exceptions import StepError
+from accrue.schemas.base import UsageInfo
+from accrue.schemas.field_spec import FieldSpec
+from accrue.steps.base import Step, StepContext, StepResult
+from accrue.steps.llm import LLMStep
+from accrue.steps.providers.base import LLMAPIError, LLMResponse
 
 # -- helpers -------------------------------------------------------------
 
@@ -603,7 +603,7 @@ class TestStructuredOutputs:
 
     def test_auto_on_for_anthropic_client(self):
         """AnthropicClient + dict fields → json_schema (constrained decoding)."""
-        from lattice.steps.providers.anthropic import AnthropicClient
+        from accrue.steps.providers.anthropic import AnthropicClient
 
         client = AnthropicClient(api_key="test")
         step = LLMStep(name="llm", fields={"f1": "test"}, client=client)
@@ -612,7 +612,7 @@ class TestStructuredOutputs:
 
     def test_auto_on_for_google_client(self):
         """GoogleClient + dict fields → json_schema."""
-        from lattice.steps.providers.google import GoogleClient
+        from accrue.steps.providers.google import GoogleClient
 
         client = GoogleClient(api_key="test")
         step = LLMStep(name="llm", fields={"f1": "test"}, client=client)
@@ -682,7 +682,7 @@ class TestStructuredOutputs:
         resp = _mock_llm_response(json.dumps({"f1": "val"}))
         mock_client = _make_mock_client(resp)
         # Native OpenAI client → auto-enabled
-        from lattice.steps.providers.openai import OpenAIClient
+        from accrue.steps.providers.openai import OpenAIClient
 
         step = LLMStep(
             name="llm",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from lattice.schemas.field_spec import FieldSpec
+from accrue.schemas.field_spec import FieldSpec
 
 
 class TestFieldSpecValid:

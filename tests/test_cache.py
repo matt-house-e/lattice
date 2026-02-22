@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lattice.core.cache import (
+from accrue.core.cache import (
     CacheManager,
     _compute_step_cache_key,
     canonical_json,
@@ -39,7 +39,7 @@ class TestCacheManager:
 
     def test_ttl_expiry(self, tmp_path):
         mgr = CacheManager(cache_dir=str(tmp_path), ttl=1)
-        with patch("lattice.core.cache.time") as mock_time:
+        with patch("accrue.core.cache.time") as mock_time:
             mock_time.time.return_value = 1000.0
             mgr.set("k1", "step_a", {"v": 1})
 
@@ -54,7 +54,7 @@ class TestCacheManager:
 
     def test_no_expiry_when_ttl_zero(self, tmp_path):
         mgr = CacheManager(cache_dir=str(tmp_path), ttl=0)
-        with patch("lattice.core.cache.time") as mock_time:
+        with patch("accrue.core.cache.time") as mock_time:
             mock_time.time.return_value = 1000.0
             mgr.set("k1", "step_a", {"v": 1})
 
@@ -88,7 +88,7 @@ class TestCacheManager:
 
     def test_cleanup_expired(self, tmp_path):
         mgr = CacheManager(cache_dir=str(tmp_path), ttl=1)
-        with patch("lattice.core.cache.time") as mock_time:
+        with patch("accrue.core.cache.time") as mock_time:
             mock_time.time.return_value = 1000.0
             mgr.set("k1", "step_a", {"v": 1})
             mgr.set("k2", "step_a", {"v": 2})

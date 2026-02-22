@@ -1,6 +1,6 @@
 # GitHub Standards and Best Practices
 
-> Version 2.0 - Lattice
+> Version 2.0 - Accrue
 > Based on: Conventional Commits v1.0, SemVer 2.0, and GitHub best practices
 
 ## Table of Contents
@@ -90,7 +90,7 @@ We use a **hierarchical system** matching industry-standard Agile methodologies:
 
 #### Component Prefixes
 
-Based on the lattice package structure:
+Based on the accrue package structure:
 
 - `[Core]` - Config, processors, enricher, exceptions
 - `[VectorStore]` - Vector store and document management
@@ -342,10 +342,10 @@ AI assistants should follow these standards when creating issues, PRs, or commit
 - **Low**: Nice to have, technical debt
 
 ### Component Mapping
-- `core` → `lattice/core/`
-- `vector-store` → `lattice/vector_store/`
-- `chains` → `lattice/chains/`
-- `data` → `lattice/data/`
+- `core` → `accrue/core/`
+- `vector-store` → `accrue/vector_store/`
+- `chains` → `accrue/chains/`
+- `data` → `accrue/data/`
 - `testing` → `tests/`
 - `infra` → CI/CD, deployment configs
 - `docs` → `docs/`, README, CLAUDE.md

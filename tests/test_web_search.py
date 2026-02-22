@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from lattice.steps.base import StepContext
-from lattice.utils.web_search import web_search
+from accrue.steps.base import StepContext
+from accrue.utils.web_search import web_search
 
 # ---------------------------------------------------------------------------
 # Helpers

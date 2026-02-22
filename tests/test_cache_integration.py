@@ -9,10 +9,10 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 
-from lattice.core.config import EnrichmentConfig
-from lattice.pipeline.pipeline import Pipeline, PipelineResult
-from lattice.steps.base import StepContext, StepResult
-from lattice.steps.function import FunctionStep
+from accrue.core.config import EnrichmentConfig
+from accrue.pipeline.pipeline import Pipeline, PipelineResult
+from accrue.steps.base import StepContext, StepResult
+from accrue.steps.function import FunctionStep
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -260,7 +260,7 @@ class TestCacheTTLExpiry:
         config = _config_with_cache(tmp_path, cache_ttl=1)
         df = pd.DataFrame([{"company": "Acme"}])
 
-        with patch("lattice.core.cache.time") as mock_time:
+        with patch("accrue.core.cache.time") as mock_time:
             mock_time.time.return_value = 1000.0
             pipeline.run(df, config)
             assert counter["calls"] == 1

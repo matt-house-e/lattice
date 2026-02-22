@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from lattice.schemas.base import UsageInfo
-from lattice.steps.providers.base import LLMAPIError, LLMClient, LLMResponse
-from lattice.steps.providers.openai import OpenAIClient
+from accrue.schemas.base import UsageInfo
+from accrue.steps.providers.base import LLMAPIError, LLMClient, LLMResponse
+from accrue.steps.providers.openai import OpenAIClient
 
 # -- LLMResponse ---------------------------------------------------------
 
@@ -29,7 +29,7 @@ class TestLLMResponse:
         assert r.usage.total_tokens == 15
 
     def test_creation_with_citations(self):
-        from lattice.schemas.grounding import Citation
+        from accrue.schemas.grounding import Citation
 
         cites = [Citation(url="https://example.com", title="Example")]
         r = LLMResponse(content="hello", citations=cites)
@@ -464,7 +464,7 @@ class TestAnthropicClient:
     async def test_json_schema_translated_to_output_config(self):
         """json_schema response_format → Anthropic output_config.format."""
         self._install_mock_anthropic()
-        from lattice.steps.providers.anthropic import AnthropicClient
+        from accrue.steps.providers.anthropic import AnthropicClient
 
         schema = {
             "type": "object",
@@ -509,7 +509,7 @@ class TestAnthropicClient:
     async def test_json_object_ignored(self):
         """json_object has no Anthropic equivalent — no output_config set."""
         self._install_mock_anthropic()
-        from lattice.steps.providers.anthropic import AnthropicClient
+        from accrue.steps.providers.anthropic import AnthropicClient
 
         mock_response = SimpleNamespace(
             content=[SimpleNamespace(text='{"f1": "val"}', type="text", citations=None)],
@@ -536,7 +536,7 @@ class TestAnthropicClient:
     async def test_none_response_format_no_output_config(self):
         """No response_format → no output_config."""
         self._install_mock_anthropic()
-        from lattice.steps.providers.anthropic import AnthropicClient
+        from accrue.steps.providers.anthropic import AnthropicClient
 
         mock_response = SimpleNamespace(
             content=[SimpleNamespace(text="hello", type="text", citations=None)],
@@ -562,7 +562,7 @@ class TestAnthropicClient:
     async def test_tools_disable_structured_outputs(self):
         """When tools are passed, output_config is NOT set (incompatible with citations)."""
         self._install_mock_anthropic()
-        from lattice.steps.providers.anthropic import AnthropicClient
+        from accrue.steps.providers.anthropic import AnthropicClient
 
         schema = {
             "type": "object",
@@ -603,7 +603,7 @@ class TestAnthropicClient:
     async def test_web_search_tool_translation(self):
         """web_search tool is translated to web_search_20250305 with all config."""
         self._install_mock_anthropic()
-        from lattice.steps.providers.anthropic import AnthropicClient
+        from accrue.steps.providers.anthropic import AnthropicClient
 
         mock_response = SimpleNamespace(
             content=[SimpleNamespace(text='{"f1": "val"}', type="text", citations=None)],
@@ -642,7 +642,7 @@ class TestAnthropicClient:
     async def test_provider_kwargs_merged_into_server_tool(self):
         """provider_kwargs are merged into the Anthropic server tool dict."""
         self._install_mock_anthropic()
-        from lattice.steps.providers.anthropic import AnthropicClient
+        from accrue.steps.providers.anthropic import AnthropicClient
 
         mock_response = SimpleNamespace(
             content=[SimpleNamespace(text='{"f1": "val"}', type="text", citations=None)],
@@ -674,7 +674,7 @@ class TestAnthropicClient:
     async def test_citation_extraction(self):
         """Citations are extracted from web_search_result_location blocks."""
         self._install_mock_anthropic()
-        from lattice.steps.providers.anthropic import AnthropicClient
+        from accrue.steps.providers.anthropic import AnthropicClient
 
         mock_response = SimpleNamespace(
             content=[
@@ -762,7 +762,7 @@ class TestGoogleClient:
     async def test_json_schema_translated_to_response_json_schema(self):
         """json_schema → response_mime_type + response_json_schema."""
         self._install_mock_google()
-        from lattice.steps.providers.google import GoogleClient
+        from accrue.steps.providers.google import GoogleClient
 
         schema = {
             "type": "object",
@@ -811,7 +811,7 @@ class TestGoogleClient:
     async def test_json_object_sets_mime_type_only(self):
         """json_object → response_mime_type only, no schema."""
         self._install_mock_google()
-        from lattice.steps.providers.google import GoogleClient
+        from accrue.steps.providers.google import GoogleClient
 
         mock_response = SimpleNamespace(
             text='{"f1": "val"}',
@@ -844,7 +844,7 @@ class TestGoogleClient:
     async def test_tools_disable_structured_outputs(self):
         """When tools are passed, response_json_schema is NOT set (Gemini 2.x compat)."""
         self._install_mock_google()
-        from lattice.steps.providers.google import GoogleClient
+        from accrue.steps.providers.google import GoogleClient
 
         schema = {
             "type": "object",
@@ -891,7 +891,7 @@ class TestGoogleClient:
     async def test_grounding_citation_extraction(self):
         """Citations are extracted from grounding_metadata.grounding_chunks."""
         self._install_mock_google()
-        from lattice.steps.providers.google import GoogleClient
+        from accrue.steps.providers.google import GoogleClient
 
         mock_response = SimpleNamespace(
             text='{"summary": "AI is advancing"}',
@@ -943,7 +943,7 @@ class TestGoogleClient:
     async def test_provider_kwargs_merged_into_google_search(self):
         """provider_kwargs are merged into GoogleSearch kwargs."""
         self._install_mock_google()
-        from lattice.steps.providers.google import GoogleClient
+        from accrue.steps.providers.google import GoogleClient
 
         mock_response = SimpleNamespace(
             text='{}',
@@ -983,7 +983,7 @@ class TestGoogleClient:
     async def test_allowed_domains_warns(self, caplog):
         """Passing allowed_domains to Google logs a warning (not supported)."""
         self._install_mock_google()
-        from lattice.steps.providers.google import GoogleClient
+        from accrue.steps.providers.google import GoogleClient
         import logging
 
         mock_response = SimpleNamespace(

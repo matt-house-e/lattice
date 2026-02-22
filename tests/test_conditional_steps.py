@@ -7,13 +7,13 @@ from typing import Any
 
 import pytest
 
-from lattice.core.exceptions import PipelineError
-from lattice.core.hooks import EnrichmentHooks, RowCompleteEvent
-from lattice.pipeline.pipeline import Pipeline, _build_skip_values, _should_skip_row
-from lattice.schemas.field_spec import FieldSpec
-from lattice.steps.base import StepContext, StepResult
-from lattice.steps.function import FunctionStep
-from lattice.steps.llm import LLMStep
+from accrue.core.exceptions import PipelineError
+from accrue.core.hooks import EnrichmentHooks, RowCompleteEvent
+from accrue.pipeline.pipeline import Pipeline, _build_skip_values, _should_skip_row
+from accrue.schemas.field_spec import FieldSpec
+from accrue.steps.base import StepContext, StepResult
+from accrue.steps.function import FunctionStep
+from accrue.steps.llm import LLMStep
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -735,8 +735,8 @@ class TestMultiStepIntegration:
 class TestCachingWithConditionals:
     @pytest.mark.asyncio
     async def test_skipped_rows_not_cached(self, tmp_path):
-        from lattice.core.cache import CacheManager
-        from lattice.core.config import EnrichmentConfig
+        from accrue.core.cache import CacheManager
+        from accrue.core.config import EnrichmentConfig
 
         call_count = 0
 

@@ -8,12 +8,12 @@ from unittest.mock import AsyncMock
 import pandas as pd
 import pytest
 
-from lattice.core.config import EnrichmentConfig
-from lattice.core.enricher import Enricher
-from lattice.pipeline.pipeline import Pipeline, PipelineResult
-from lattice.schemas.base import CostSummary
-from lattice.steps.function import FunctionStep
-from lattice.steps.llm import LLMStep
+from accrue.core.config import EnrichmentConfig
+from accrue.core.enricher import Enricher
+from accrue.pipeline.pipeline import Pipeline, PipelineResult
+from accrue.schemas.base import CostSummary
+from accrue.steps.function import FunctionStep
+from accrue.steps.llm import LLMStep
 
 # -- helpers -----------------------------------------------------------------
 
@@ -110,7 +110,7 @@ class TestPipelineRunAsync:
 
     @pytest.mark.asyncio
     async def test_run_async_with_errors(self):
-        from lattice.core.exceptions import StepError
+        from accrue.core.exceptions import StepError
 
         def failing_fn(ctx):
             if ctx.row["x"] == 2:
@@ -180,7 +180,7 @@ class TestInlineFieldSpecs:
         assert step._field_specs == {}
 
     def test_inline_specs_used_in_system_message(self):
-        from lattice.steps.base import StepContext
+        from accrue.steps.base import StepContext
 
         step = LLMStep(
             "analyze",
@@ -218,8 +218,8 @@ class TestInlineFieldSpecs:
     def test_pipeline_run_with_inline_specs(self):
         """Full integration: Pipeline.run() with LLMStep inline fields (mocked)."""
         import json
-        from lattice.steps.providers.base import LLMResponse
-        from lattice.schemas.base import UsageInfo
+        from accrue.steps.providers.base import LLMResponse
+        from accrue.schemas.base import UsageInfo
 
         mock_client = AsyncMock()
         mock_client.complete = AsyncMock(
@@ -263,7 +263,7 @@ class TestPipelineResult:
         assert not r.has_errors
 
     def test_success_rate_with_errors(self):
-        from lattice.core.exceptions import RowError
+        from accrue.core.exceptions import RowError
 
         r = PipelineResult(
             data=pd.DataFrame({"x": [1, 2, 3]}),

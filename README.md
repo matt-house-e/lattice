@@ -1,22 +1,22 @@
 <p align="center">
-  <strong>Lattice</strong><br>
+  <strong>Accrue</strong><br>
   <em>Enrich 10,000 rows with structured LLM outputs. Not one row. Not a million. The messy middle.</em>
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/lattice-enrichment/"><img src="https://img.shields.io/pypi/v/lattice-enrichment?color=blue" alt="PyPI"></a>
-  <a href="https://pypi.org/project/lattice-enrichment/"><img src="https://img.shields.io/pypi/pyversions/lattice-enrichment" alt="Python"></a>
-  <a href="https://github.com/lattice-team/lattice-enrichment/blob/main/LICENSE"><img src="https://img.shields.io/github/license/lattice-team/lattice-enrichment" alt="License"></a>
+  <a href="https://pypi.org/project/accrue/"><img src="https://img.shields.io/pypi/v/accrue?color=blue" alt="PyPI"></a>
+  <a href="https://pypi.org/project/accrue/"><img src="https://img.shields.io/pypi/pyversions/accrue" alt="Python"></a>
+  <a href="https://github.com/accrue-team/accrue/blob/main/LICENSE"><img src="https://img.shields.io/github/license/accrue-team/accrue" alt="License"></a>
 </p>
 
 ---
 
-**Lattice is a programmatic enrichment engine.** Define a pipeline of composable steps, point it at a DataFrame, get structured results back. Lattice handles the orchestration you'd otherwise build yourself: column-oriented batching, step dependencies, Pydantic validation, retries, caching, checkpointing, and async concurrency.
+**Accrue is a programmatic enrichment engine.** Define a pipeline of composable steps, point it at a DataFrame, get structured results back. Accrue handles the orchestration you'd otherwise build yourself: column-oriented batching, step dependencies, Pydantic validation, retries, caching, checkpointing, and async concurrency.
 
-**The gap between [Instructor](https://github.com/instructor-ai/instructor) and [Clay](https://www.clay.com/).** Instructor is great for a single LLM call. Clay is a full SaaS platform. Lattice is the missing middle: a Python library for running structured enrichment pipelines across hundreds to tens of thousands of rows. Version-control your enrichment logic, iterate on prompts with cached intermediate results, and pay API costs instead of SaaS markups.
+**The gap between [Instructor](https://github.com/instructor-ai/instructor) and [Clay](https://www.clay.com/).** Instructor is great for a single LLM call. Clay is a full SaaS platform. Accrue is the missing middle: a Python library for running structured enrichment pipelines across hundreds to tens of thousands of rows. Version-control your enrichment logic, iterate on prompts with cached intermediate results, and pay API costs instead of SaaS markups.
 
 ```python
-from lattice import Pipeline, LLMStep
+from accrue import Pipeline, LLMStep
 
 pipeline = Pipeline([
     LLMStep("analyze", fields={
@@ -44,7 +44,7 @@ print(f"Tokens used: {result.cost.total_tokens:,}")
 Requires Python 3.10+.
 
 ```bash
-pip install lattice-enrichment
+pip install accrue
 ```
 
 Set your API key:
@@ -56,13 +56,13 @@ export OPENAI_API_KEY=sk-...
 That's it. OpenAI is the default provider (zero config, [structured outputs](https://platform.openai.com/docs/guides/structured-outputs) auto-enabled). Anthropic and Google are optional:
 
 ```bash
-pip install lattice-enrichment[anthropic]  # Claude
-pip install lattice-enrichment[google]     # Gemini
+pip install accrue[anthropic]  # Claude
+pip install accrue[google]     # Gemini
 ```
 
-## Why Lattice
+## Why Accrue
 
-| | Instructor | Lattice | Clay |
+| | Instructor | Accrue | Clay |
 |---|---|---|---|
 | **Scope** | Single LLM call | Pipeline of steps across rows | Full SaaS platform |
 | **Input** | One object | DataFrame / list[dict] | Spreadsheet UI |
@@ -74,7 +74,7 @@ pip install lattice-enrichment[google]     # Gemini
 
 ## Core Concepts
 
-Lattice runs **column-oriented** enrichment. Each step processes ALL rows before the next step starts. Independent steps run in parallel.
+Accrue runs **column-oriented** enrichment. Each step processes ALL rows before the next step starts. Independent steps run in parallel.
 
 ```
 [All rows] --> Step 1 (web search)    --> batch complete
@@ -93,7 +93,7 @@ Three building blocks:
 ### Multi-step pipeline with dependencies
 
 ```python
-from lattice import Pipeline, FunctionStep, LLMStep, web_search
+from accrue import Pipeline, FunctionStep, LLMStep, web_search
 
 pipeline = Pipeline([
     # Step 1: Search the web for each company
@@ -124,7 +124,7 @@ result = pipeline.run(companies_df)
 
 ```python
 # Anthropic (Claude)
-from lattice.providers import AnthropicClient
+from accrue.providers import AnthropicClient
 
 LLMStep("analyze",
     fields={"summary": "Summarize this company's business model"},
@@ -133,7 +133,7 @@ LLMStep("analyze",
 )
 
 # Google (Gemini)
-from lattice.providers import GoogleClient
+from accrue.providers import GoogleClient
 
 LLMStep("analyze",
     fields={"summary": "Summarize this company's business model"},
@@ -189,7 +189,7 @@ LLMStep("classify", fields={
 ### Caching and checkpointing
 
 ```python
-from lattice import EnrichmentConfig
+from accrue import EnrichmentConfig
 
 config = EnrichmentConfig(
     enable_caching=True,          # SQLite cache: skip redundant API calls
@@ -210,7 +210,7 @@ result = pipeline.run(df, config=config)
 Plug in observability without adding dependencies:
 
 ```python
-from lattice import EnrichmentHooks
+from accrue import EnrichmentHooks
 
 result = pipeline.run(df, hooks=EnrichmentHooks(
     on_pipeline_start=lambda e: print(f"Starting {len(e.step_names)} steps, {e.num_rows} rows"),
@@ -245,7 +245,7 @@ LLMStep("research",
 )
 
 # Works with any provider
-from lattice.providers import AnthropicClient, GoogleClient
+from accrue.providers import AnthropicClient, GoogleClient
 
 LLMStep("research", fields={...}, grounding=True, client=AnthropicClient())
 LLMStep("research", fields={...}, grounding=True, client=GoogleClient())
@@ -295,7 +295,7 @@ pipeline = Pipeline([
 ])
 ```
 
-Sync functions work too -- Lattice runs them via `run_in_executor` so they never block the event loop.
+Sync functions work too -- Accrue runs them via `run_in_executor` so they never block the event loop.
 
 ### Works with lists, not just DataFrames
 
@@ -312,7 +312,7 @@ Handy for server contexts, test code, and Polars users (`.to_dicts()`).
 ## Configuration Presets
 
 ```python
-from lattice import EnrichmentConfig
+from accrue import EnrichmentConfig
 
 # Development: low concurrency, verbose, caching on
 config = EnrichmentConfig.for_development()
@@ -327,7 +327,7 @@ config = EnrichmentConfig.for_server()
 ## Architecture
 
 ```
-lattice/
+accrue/
 ├── steps/          # Step protocol + LLMStep, FunctionStep
 │   └── providers/  # LLMClient protocol + OpenAI, Anthropic, Google adapters
 ├── pipeline/       # DAG resolution, column-oriented execution, run() entry point
@@ -348,7 +348,7 @@ lattice/
 
 ## Sweet Spot
 
-Lattice is built for **100 to 50,000 rows.** The primary use case is 1,000-10,000 rows -- too many for manual work or single-call tools, too few to justify big data infrastructure.
+Accrue is built for **100 to 50,000 rows.** The primary use case is 1,000-10,000 rows -- too many for manual work or single-call tools, too few to justify big data infrastructure.
 
 | Rows | Time (3 steps, 10 workers) | Cost (gpt-4.1-mini) |
 |------|---------------------------|---------------------|
@@ -357,7 +357,7 @@ Lattice is built for **100 to 50,000 rows.** The primary use case is 1,000-10,00
 | 10,000 | ~50 min | ~$20 |
 | 50,000 | ~50 min (50 workers) | ~$100 |
 
-The bottleneck is almost always API rate limits and cost, not Lattice.
+The bottleneck is almost always API rate limits and cost, not Accrue.
 
 ## API Reference
 
@@ -399,7 +399,7 @@ Dataclass controlling concurrency, retries, caching, checkpointing, and progress
 All exceptions inherit from `EnrichmentError`:
 
 ```python
-from lattice import EnrichmentError, FieldValidationError, StepError, PipelineError, RowError
+from accrue import EnrichmentError, FieldValidationError, StepError, PipelineError, RowError
 ```
 
 ### `GroundingConfig`
@@ -407,14 +407,14 @@ from lattice import EnrichmentError, FieldValidationError, StepError, PipelineEr
 Pydantic model for grounding configuration. Fields: `allowed_domains`, `blocked_domains`, `user_location`, `max_searches`, `provider_kwargs`. Cross-provider fields are mapped to native format by each adapter; `provider_kwargs` is an escape hatch for provider-specific options.
 
 ```python
-from lattice import GroundingConfig
+from accrue import GroundingConfig
 ```
 
 ## Contributing
 
 ```bash
-git clone https://github.com/lattice-team/lattice-enrichment.git
-cd lattice-enrichment
+git clone https://github.com/accrue-team/accrue.git
+cd accrue
 pip install -e ".[dev]"
 pytest
 ```

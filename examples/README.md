@@ -1,6 +1,6 @@
-# Lattice Examples
+# Accrue Examples
 
-This directory contains example configurations and sample data for Lattice.
+This directory contains example configurations and sample data for Accrue.
 
 ## Files
 
@@ -13,7 +13,7 @@ This directory contains example configurations and sample data for Lattice.
 ### Inline field specs (recommended)
 ```python
 import pandas as pd
-from lattice import Pipeline, LLMStep
+from accrue import Pipeline, LLMStep
 
 pipeline = Pipeline([
     LLMStep("analyze", fields={
@@ -33,7 +33,7 @@ print(result.data)
 
 ### Multi-step pipeline
 ```python
-from lattice import Pipeline, FunctionStep, LLMStep
+from accrue import Pipeline, FunctionStep, LLMStep
 
 def lookup_funding(ctx):
     company = ctx.row.get("name", "")
@@ -51,8 +51,8 @@ result = pipeline.run(df)
 
 ### CSV field loading (for teams)
 ```python
-from lattice import Pipeline, LLMStep
-from lattice.data import load_fields
+from accrue import Pipeline, LLMStep
+from accrue.data import load_fields
 
 fields = load_fields("examples/field_categories.csv", category="business_analysis")
 pipeline = Pipeline([LLMStep("analyze", fields=fields)])

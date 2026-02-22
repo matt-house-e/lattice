@@ -1,9 +1,9 @@
 """Convenience re-export of LLM provider adapters.
 
 Usage:
-    from lattice.providers import OpenAIClient
-    from lattice.providers import AnthropicClient  # requires: pip install lattice[anthropic]
-    from lattice.providers import GoogleClient      # requires: pip install lattice[google]
+    from accrue.providers import OpenAIClient
+    from accrue.providers import AnthropicClient  # requires: pip install accrue[anthropic]
+    from accrue.providers import GoogleClient      # requires: pip install accrue[google]
 """
 
 from .steps.providers.base import LLMAPIError, LLMClient, LLMResponse

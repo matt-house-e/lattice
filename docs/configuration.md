@@ -1,13 +1,13 @@
 # Configuration Guide
 
-Complete reference for configuring Lattice enrichment pipelines.
+Complete reference for configuring Accrue enrichment pipelines.
 
 ## Quick Start
 
 Use factory presets for common scenarios:
 
 ```python
-from lattice import EnrichmentConfig
+from accrue import EnrichmentConfig
 
 # Development: low concurrency, verbose logging (safe for Tier 1)
 config = EnrichmentConfig.for_development()
@@ -60,7 +60,7 @@ config = EnrichmentConfig.for_server()
 
 **Default is 10** — safe for most Tier 1-2 accounts. Production deployments on Tier 2+ should use 20-30.
 
-If you hit rate limits, Lattice's retry/backoff (Phase 2) will handle 429 errors automatically. Setting `max_workers` too high just means more retries; setting it too low means wasted throughput.
+If you hit rate limits, Accrue's retry/backoff (Phase 2) will handle 429 errors automatically. Setting `max_workers` too high just means more retries; setting it too low means wasted throughput.
 
 ## Custom Configuration
 
@@ -79,7 +79,7 @@ result = pipeline.run(df, config=config)
 ## Sync & Async Usage
 
 ```python
-from lattice import Pipeline, EnrichmentConfig
+from accrue import Pipeline, EnrichmentConfig
 
 # Sync (wraps asyncio.run)
 result = pipeline.run(df, config=config)
@@ -94,7 +94,7 @@ result = await runner.run_async(df)
 
 ## Checkpointing
 
-Lattice checkpoints at the step level. After each step completes for all rows, results are saved to disk. If a later step fails, re-running resumes from the last completed step.
+Accrue checkpoints at the step level. After each step completes for all rows, results are saved to disk. If a later step fails, re-running resumes from the last completed step.
 
 ```python
 config = EnrichmentConfig(

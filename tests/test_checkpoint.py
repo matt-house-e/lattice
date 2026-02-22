@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core.checkpoint import CheckpointManager, CheckpointData
-from lattice.core.config import EnrichmentConfig
+from accrue.core.checkpoint import CheckpointManager, CheckpointData
+from accrue.core.config import EnrichmentConfig
 
 # -- helpers -----------------------------------------------------------------
 

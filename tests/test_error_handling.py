@@ -7,10 +7,10 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from lattice.core.config import EnrichmentConfig
-from lattice.core.exceptions import RowError, StepError
-from lattice.pipeline.pipeline import Pipeline
-from lattice.steps.function import FunctionStep
+from accrue.core.config import EnrichmentConfig
+from accrue.core.exceptions import RowError, StepError
+from accrue.pipeline.pipeline import Pipeline
+from accrue.steps.function import FunctionStep
 
 # -- helpers -----------------------------------------------------------------
 
@@ -154,7 +154,7 @@ class TestRowError:
 class TestEnricherWithErrors:
     def test_enricher_returns_partial_results(self):
         """Enricher still returns a DataFrame when some rows fail."""
-        from lattice.core.enricher import Enricher
+        from accrue.core.enricher import Enricher
 
         p = Pipeline([_failing_step("s", ["f"], fail_indices={1})])
 
