@@ -10,7 +10,6 @@ from lattice.steps.prompt_builder import (
     build_system_message,
 )
 
-
 # -- key detection -------------------------------------------------------
 
 
@@ -141,9 +140,7 @@ class TestBuildSystemMessage:
 
     def test_prior_results_included_when_present(self):
         specs = {"f1": FieldSpec(prompt="test")}
-        msg = build_system_message(
-            specs, {"x": 1}, prior_results={"context": "data"}
-        )
+        msg = build_system_message(specs, {"x": 1}, prior_results={"context": "data"})
 
         assert "<prior_results>" in msg
         assert "context" in msg
@@ -178,9 +175,7 @@ class TestBuildSystemMessage:
 
     def test_custom_system_prompt_override(self):
         specs = {"f1": FieldSpec(prompt="test")}
-        msg = build_system_message(
-            specs, {"x": 1}, custom_system_prompt="Custom instructions."
-        )
+        msg = build_system_message(specs, {"x": 1}, custom_system_prompt="Custom instructions.")
 
         assert msg.startswith("Custom instructions.")
         # Data sections still appended
@@ -245,7 +240,8 @@ class TestSystemPromptHeader:
     def test_header_ignored_when_custom_system_prompt_set(self):
         specs = {"f1": FieldSpec(prompt="test")}
         msg = build_system_message(
-            specs, {"x": 1},
+            specs,
+            {"x": 1},
             custom_system_prompt="Custom prompt.",
             system_prompt_header="Should be ignored.",
         )

@@ -5,7 +5,6 @@ import pytest
 from lattice.schemas.base import UsageInfo
 from lattice.steps.base import Step, StepContext, StepResult
 
-
 # -- StepContext ---------------------------------------------------------
 
 

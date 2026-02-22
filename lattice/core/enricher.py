@@ -4,8 +4,10 @@ Internal runner for Lattice. Created via ``Pipeline.runner(config)``
 for repeated execution with checkpointing.
 """
 
+from __future__ import annotations
+
 import asyncio
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -27,7 +29,7 @@ class Enricher:
     def __init__(
         self,
         pipeline: Pipeline,
-        config: Optional[EnrichmentConfig] = None,
+        config: EnrichmentConfig | None = None,
         hooks: Any = None,
     ) -> None:
         """Create an Enricher (typically via ``Pipeline.runner(config)``).
@@ -48,8 +50,8 @@ class Enricher:
     def run(
         self,
         df: pd.DataFrame,
-        overwrite_fields: Optional[bool] = None,
-        data_identifier: Optional[str] = None,
+        overwrite_fields: bool | None = None,
+        data_identifier: str | None = None,
     ) -> pd.DataFrame:
         """Synchronous wrapper around :meth:`run_async`.
 
@@ -66,17 +68,15 @@ class Enricher:
             # Re-raise our own RuntimeError; swallow the "no running event loop" one
             if "run_async" in str(exc):
                 raise
-        return asyncio.run(
-            self.run_async(df, overwrite_fields, data_identifier)
-        )
+        return asyncio.run(self.run_async(df, overwrite_fields, data_identifier))
 
     # -- async entry point -----------------------------------------------
 
     async def run_async(
         self,
         df: pd.DataFrame,
-        overwrite_fields: Optional[bool] = None,
-        data_identifier: Optional[str] = None,
+        overwrite_fields: bool | None = None,
+        data_identifier: str | None = None,
     ) -> pd.DataFrame:
         """Execute the pipeline across all rows of *df*.
 
@@ -120,9 +120,7 @@ class Enricher:
                 prior_step_results = cp.step_results
                 completed_steps = list(cp.completed_steps)
                 checkpoint_results = dict(cp.step_results)
-                logger.info(
-                    f"Resuming from checkpoint: skipping {completed_steps}"
-                )
+                logger.info(f"Resuming from checkpoint: skipping {completed_steps}")
 
         # Convert DataFrame to rows
         rows = df.to_dict(orient="records")
@@ -159,6 +157,7 @@ class Enricher:
         checkpoint_interval = self.config.checkpoint_interval
         on_partial_checkpoint = None
         if checkpoint_interval > 0 and self._checkpoint._enabled:
+
             def on_partial_checkpoint(step_name, partial_results, completed_count):
                 self._checkpoint.save_step(
                     data_identifier=data_identifier,
@@ -192,9 +191,7 @@ class Enricher:
             error_summary = {}
             for err in errors:
                 error_summary[err.step_name] = error_summary.get(err.step_name, 0) + 1
-            logger.warning(
-                "Pipeline completed with %d row errors: %s", len(errors), error_summary
-            )
+            logger.warning("Pipeline completed with %d row errors: %s", len(errors), error_summary)
 
         # Write results back to DataFrame
         df_out = df.copy()
@@ -213,7 +210,5 @@ class Enricher:
         # Cleanup checkpoint on success
         self._checkpoint.cleanup(data_identifier, category)
 
-        logger.info(
-            f"Enrichment complete: {len(df_out)} rows"
-        )
+        logger.info(f"Enrichment complete: {len(df_out)} rows")
         return df_out

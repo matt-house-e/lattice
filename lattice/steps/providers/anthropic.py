@@ -29,9 +29,7 @@ class AnthropicClient:
             try:
                 from anthropic import AsyncAnthropic
             except ImportError:
-                raise ImportError(
-                    "anthropic package required: pip install lattice[anthropic]"
-                )
+                raise ImportError("anthropic package required: pip install lattice[anthropic]")
             key = self._api_key or os.environ.get("ANTHROPIC_API_KEY")
             self._client = AsyncAnthropic(api_key=key)
         return self._client

@@ -12,7 +12,6 @@ import pytest
 from lattice.steps.base import StepContext
 from lattice.utils.web_search import web_search
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

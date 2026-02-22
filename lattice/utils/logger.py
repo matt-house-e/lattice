@@ -7,66 +7,68 @@ This module provides utilities for setting up application logging with:
 - Configurable log levels and formats
 """
 
+from __future__ import annotations
+
 import logging
 import json
 import sys
 import os
-from typing import Optional, Literal, Dict, Any
+from typing import Any, Literal
 from datetime import datetime
 
 
 class ColoredFormatter(logging.Formatter):
     """Colored console formatter for better readability in development."""
-    
+
     # ANSI color codes
     COLORS = {
-        'DEBUG': '\033[36m',     # Cyan
-        'INFO': '\033[32m',      # Green  
-        'WARNING': '\033[33m',   # Yellow
-        'ERROR': '\033[31m',     # Red
-        'CRITICAL': '\033[35m',  # Magenta
+        "DEBUG": "\033[36m",  # Cyan
+        "INFO": "\033[32m",  # Green
+        "WARNING": "\033[33m",  # Yellow
+        "ERROR": "\033[31m",  # Red
+        "CRITICAL": "\033[35m",  # Magenta
     }
-    RESET = '\033[0m'
-    BOLD = '\033[1m'
-    
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+
     def format(self, record: logging.LogRecord) -> str:
         """Format the log record with colors."""
         # Create a copy to avoid modifying the original record
         record_copy = logging.makeLogRecord(record.__dict__)
-        
+
         # Add colors to level name
-        color = self.COLORS.get(record_copy.levelname, '')
+        color = self.COLORS.get(record_copy.levelname, "")
         record_copy.levelname = f"{color}{self.BOLD}{record_copy.levelname}{self.RESET}"
-        
+
         # Add colors to logger name
         record_copy.name = f"\033[90m{record_copy.name}{self.RESET}"  # Gray
-        
+
         return super().format(record_copy)
 
 
 class JSONFormatter(logging.Formatter):
     """JSON formatter for structured logging in production."""
-    
+
     def format(self, record: logging.LogRecord) -> str:
         """Format the log record as JSON."""
-        log_entry: Dict[str, Any] = {
-            'timestamp': datetime.fromtimestamp(record.created).isoformat(),
-            'level': record.levelname,
-            'logger': record.name,
-            'message': record.getMessage(),
-            'module': record.module,
-            'function': record.funcName,
-            'line': record.lineno,
+        log_entry: dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno,
         }
-        
+
         # Add exception info if present
         if record.exc_info:
-            log_entry['exception'] = self.formatException(record.exc_info)
-            
+            log_entry["exception"] = self.formatException(record.exc_info)
+
         # Add extra fields if present
-        if hasattr(record, 'extra_fields'):
+        if hasattr(record, "extra_fields"):
             log_entry.update(record.extra_fields)
-            
+
         return json.dumps(log_entry, default=str)
 
 
@@ -77,7 +79,7 @@ def setup_logging(
 ) -> None:
     """
     Set up application logging with colored console or JSON formatting.
-    
+
     Args:
         level: The logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).
         format_type: Either 'console' for colored output or 'json' for structured logging.
@@ -85,16 +87,16 @@ def setup_logging(
     """
     # Convert string level to logging constant
     numeric_level = getattr(logging, level.upper(), logging.INFO)
-    
+
     # Clear any existing handlers
     root_logger = logging.getLogger()
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
-    
+
     # Create console handler
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(numeric_level)
-    
+
     # Set up formatter based on format type
     if format_type == "json":
         formatter = JSONFormatter()
@@ -104,18 +106,17 @@ def setup_logging(
             format_string = "%(asctime)s | %(name)s | %(levelname)s | %(message)s"
         else:
             format_string = "%(name)s | %(levelname)s | %(message)s"
-        
+
         formatter = ColoredFormatter(
-            fmt=format_string,
-            datefmt="%H:%M:%S"  # Simpler time format for console
+            fmt=format_string, datefmt="%H:%M:%S"  # Simpler time format for console
         )
-    
+
     handler.setFormatter(formatter)
-    
+
     # Configure root logger
     root_logger.setLevel(numeric_level)
     root_logger.addHandler(handler)
-    
+
     # Quiet down noisy third-party loggers
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("requests").setLevel(logging.WARNING)
@@ -124,10 +125,10 @@ def setup_logging(
 def get_logger(name: str) -> logging.Logger:
     """
     Get a logger instance for the given name.
-    
+
     Args:
         name: The name for the logger (typically __name__).
-        
+
     Returns:
         logging.Logger: Configured logger instance.
     """
@@ -137,7 +138,7 @@ def get_logger(name: str) -> logging.Logger:
 def log_with_context(logger: logging.Logger, level: str, message: str, **context) -> None:
     """
     Log a message with additional context fields (useful for JSON logging).
-    
+
     Args:
         logger: The logger instance.
         level: Log level (info, debug, warning, error, critical).
@@ -146,7 +147,7 @@ def log_with_context(logger: logging.Logger, level: str, message: str, **context
     """
     # Create a log record with extra fields
     log_method = getattr(logger, level.lower())
-    
+
     # For JSON logging, we can add context as extra fields
     record = logging.LogRecord(
         name=logger.name,
@@ -158,7 +159,7 @@ def log_with_context(logger: logging.Logger, level: str, message: str, **context
         exc_info=None,
     )
     record.extra_fields = context
-    
+
     # Use the logger's handle method to process the record
     if logger.isEnabledFor(record.levelno):
-        logger.handle(record) 
+        logger.handle(record)

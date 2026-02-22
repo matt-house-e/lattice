@@ -13,14 +13,15 @@ from lattice.core.enricher import Enricher
 from lattice.pipeline.pipeline import Pipeline
 from lattice.steps.function import FunctionStep
 
-
 # -- helpers -----------------------------------------------------------------
 
 
 def _identity_step(name: str, fields: list[str], **kwargs) -> FunctionStep:
     """Step that produces static '{field}_value' for each field."""
+
     def fn(ctx):
         return {f: f"{f}_value" for f in fields}
+
     return FunctionStep(name=name, fn=fn, fields=fields, **kwargs)
 
 
@@ -46,10 +47,12 @@ class TestBasicExecution:
         def step_b_fn(ctx):
             return {"processed": ctx.prior_results.get("raw", "") + "_done"}
 
-        pipeline = Pipeline([
-            FunctionStep("a", fn=step_a_fn, fields=["raw"]),
-            FunctionStep("b", fn=step_b_fn, fields=["processed"], depends_on=["a"]),
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep("a", fn=step_a_fn, fields=["raw"]),
+                FunctionStep("b", fn=step_b_fn, fields=["processed"], depends_on=["a"]),
+            ]
+        )
         enricher = Enricher(pipeline)
 
         df = pd.DataFrame({"input": ["hello", "world"]})
@@ -87,9 +90,11 @@ class TestInternalFieldsFiltered:
         def search_fn(ctx):
             return {"__web_ctx": "search data", "summary": "based on search"}
 
-        pipeline = Pipeline([
-            FunctionStep("search", fn=search_fn, fields=["__web_ctx", "summary"]),
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep("search", fn=search_fn, fields=["__web_ctx", "summary"]),
+            ]
+        )
         enricher = Enricher(pipeline)
 
         df = pd.DataFrame({"q": ["test"]})
@@ -105,10 +110,12 @@ class TestInternalFieldsFiltered:
         def step_b_fn(ctx):
             return {"output": f"got: {ctx.prior_results.get('__internal', '')}"}
 
-        pipeline = Pipeline([
-            FunctionStep("a", fn=step_a_fn, fields=["__internal"]),
-            FunctionStep("b", fn=step_b_fn, fields=["output"], depends_on=["a"]),
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep("a", fn=step_a_fn, fields=["__internal"]),
+                FunctionStep("b", fn=step_b_fn, fields=["output"], depends_on=["a"]),
+            ]
+        )
         enricher = Enricher(pipeline)
 
         df = pd.DataFrame({"x": [1]})
@@ -150,9 +157,11 @@ class TestPreservesOriginalColumns:
 
 class TestOverwriteBehaviour:
     def test_overwrite_false_preserves_existing(self):
-        pipeline = Pipeline([
-            FunctionStep("s", fn=lambda ctx: {"f": "new_val"}, fields=["f"]),
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep("s", fn=lambda ctx: {"f": "new_val"}, fields=["f"]),
+            ]
+        )
         config = EnrichmentConfig(overwrite_fields=False)
         enricher = Enricher(pipeline, config=config)
 
@@ -163,9 +172,11 @@ class TestOverwriteBehaviour:
         assert result.at[1, "f"] == "new_val"
 
     def test_overwrite_true_replaces(self):
-        pipeline = Pipeline([
-            FunctionStep("s", fn=lambda ctx: {"f": "new_val"}, fields=["f"]),
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep("s", fn=lambda ctx: {"f": "new_val"}, fields=["f"]),
+            ]
+        )
         config = EnrichmentConfig(overwrite_fields=True)
         enricher = Enricher(pipeline, config=config)
 
@@ -176,9 +187,11 @@ class TestOverwriteBehaviour:
         assert result.at[1, "f"] == "new_val"
 
     def test_overwrite_param_overrides_config(self):
-        pipeline = Pipeline([
-            FunctionStep("s", fn=lambda ctx: {"f": "new_val"}, fields=["f"]),
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep("s", fn=lambda ctx: {"f": "new_val"}, fields=["f"]),
+            ]
+        )
         config = EnrichmentConfig(overwrite_fields=False)
         enricher = Enricher(pipeline, config=config)
 
@@ -234,10 +247,12 @@ class TestCheckpointResume:
             call_tracker["step2_calls"] += 1
             return {"f2": ctx.prior_results.get("f1", "") + "_processed"}
 
-        pipeline = Pipeline([
-            FunctionStep("step1", fn=step1_fn, fields=["f1"]),
-            FunctionStep("step2", fn=step2_fn, fields=["f2"], depends_on=["step1"]),
-        ])
+        pipeline = Pipeline(
+            [
+                FunctionStep("step1", fn=step1_fn, fields=["f1"]),
+                FunctionStep("step2", fn=step2_fn, fields=["f2"], depends_on=["step1"]),
+            ]
+        )
 
         fields_dict = {"f1": {}, "f2": {}}
 

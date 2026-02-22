@@ -6,10 +6,19 @@ pipeline steps with Pydantic validation, checkpointing, and async concurrency.
 
 # Set up default logging when package is imported
 from .utils.logger import setup_logging
+
 setup_logging(level="WARNING", format_type="console", include_timestamp=False)
 
 # Public API
-from .core import Enricher, EnrichmentConfig, EnrichmentError, FieldValidationError, StepError, PipelineError, RowError
+from .core import (
+    Enricher,
+    EnrichmentConfig,
+    EnrichmentError,
+    FieldValidationError,
+    StepError,
+    PipelineError,
+    RowError,
+)
 from .core.hooks import (
     EnrichmentHooks,
     PipelineStartEvent,

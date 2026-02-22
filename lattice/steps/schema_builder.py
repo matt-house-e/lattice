@@ -8,7 +8,7 @@ level, eliminating most parse/validation retries.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, get_args
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, create_model
 
@@ -20,8 +20,8 @@ _TYPE_MAP: dict[str, type] = {
     "Number": float,
     "Boolean": bool,
     "Date": str,
-    "List[String]": List[str],
-    "JSON": Dict[str, Any],
+    "List[String]": list[str],
+    "JSON": dict[str, Any],
 }
 
 
@@ -47,6 +47,7 @@ def build_response_model(
         description = _build_description(spec)
         # create_model expects (annotation, default) or (annotation, FieldInfo)
         from pydantic import Field
+
         field_definitions[name] = (annotation, Field(description=description))
 
     model = create_model(

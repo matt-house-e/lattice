@@ -12,17 +12,18 @@ from lattice.core.exceptions import RowError, StepError
 from lattice.pipeline.pipeline import Pipeline
 from lattice.steps.function import FunctionStep
 
-
 # -- helpers -----------------------------------------------------------------
 
 
 def _failing_step(name: str, fields: list[str], fail_indices: set[int], **kwargs) -> FunctionStep:
     """Step that raises StepError for specific row indices."""
+
     def fn(ctx):
         idx = ctx.row.get("__idx")
         if idx in fail_indices:
             raise StepError(f"Row {idx} failed", step_name=name)
         return {f: f"{f}_value_{idx}" for f in fields}
+
     return FunctionStep(name=name, fn=fn, fields=fields, **kwargs)
 
 
@@ -103,14 +104,17 @@ class TestMultiStepErrors:
     @pytest.mark.asyncio
     async def test_error_in_first_step_sentinels_propagate(self):
         """Row fails in step 1 → step 2 sees None sentinel in prior_results."""
+
         def step_b_fn(ctx):
             prior_val = ctx.prior_results.get("f1")
             return {"f2": f"got:{prior_val}"}
 
-        p = Pipeline([
-            _failing_step("a", ["f1"], fail_indices={1}),
-            FunctionStep("b", fn=step_b_fn, fields=["f2"], depends_on=["a"]),
-        ])
+        p = Pipeline(
+            [
+                _failing_step("a", ["f1"], fail_indices={1}),
+                FunctionStep("b", fn=step_b_fn, fields=["f2"], depends_on=["a"]),
+            ]
+        )
         rows = [{"__idx": 0}, {"__idx": 1}]
 
         results, errors, cost = await p.execute(rows, all_fields={})

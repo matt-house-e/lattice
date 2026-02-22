@@ -23,7 +23,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -40,7 +40,7 @@ class FieldManager:
 
     def __init__(self, fields_categories_path: str) -> None:
         self.fields_categories_path = Path(fields_categories_path)
-        self.categories: Dict[str, Dict[str, Dict[str, Any]]] = (
+        self.categories: dict[str, dict[str, dict[str, Any]]] = (
             self._load_field_categories(fields_categories_path)
         )
 
@@ -52,7 +52,7 @@ class FieldManager:
 
     def _load_field_categories(
         self, csv_path: str
-    ) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    ) -> dict[str, dict[str, dict[str, Any]]]:
         try:
             if not os.path.exists(csv_path):
                 raise FieldValidationError(
@@ -75,7 +75,7 @@ class FieldManager:
                     f"Found: {', '.join(df.columns)}"
                 )
 
-            categories: Dict[str, Dict[str, Dict[str, Any]]] = {}
+            categories: dict[str, dict[str, dict[str, Any]]] = {}
 
             for idx, row in df.iterrows():
                 category = row["Category"]
@@ -117,7 +117,7 @@ class FieldManager:
             )
 
     @staticmethod
-    def _row_to_spec(row: Any, columns: list[str]) -> Dict[str, Any]:
+    def _row_to_spec(row: Any, columns: list[str]) -> dict[str, Any]:
         """Convert a single CSV row to a field spec dict.
 
         Handles legacy columns (Instructions, Guidance, Data_Type) and
@@ -133,7 +133,7 @@ class FieldManager:
                 if extra:
                     prompt = f"{prompt}\n{extra}" if prompt else extra
 
-        spec: Dict[str, Any] = {"prompt": prompt}
+        spec: dict[str, Any] = {"prompt": prompt}
 
         # -- type (legacy Data_Type fallback)
         type_val = None
@@ -168,7 +168,7 @@ class FieldManager:
 
     # -- access ----------------------------------------------------------
 
-    def get_category_fields(self, category: str) -> Dict[str, Dict[str, Any]]:
+    def get_category_fields(self, category: str) -> dict[str, dict[str, Any]]:
         """Get field specs for a category.
 
         Returns all spec keys (prompt, type, format, enum, examples,
@@ -186,13 +186,13 @@ class FieldManager:
             for field, details in self.categories[category].items()
         }
 
-    def get_categories(self) -> List[str]:
+    def get_categories(self) -> list[str]:
         return list(self.categories.keys())
 
     def validate_category(self, category: str) -> bool:
         return category in self.categories
 
-    def get_field_count(self, category: Optional[str] = None) -> int:
+    def get_field_count(self, category: str | None = None) -> int:
         if category is not None:
             if category not in self.categories:
                 return 0
@@ -212,8 +212,8 @@ class FieldManager:
 
 
 def load_fields(
-    csv_path: str, category: Optional[str] = None
-) -> Dict[str, Dict[str, Any]]:
+    csv_path: str, category: str | None = None
+) -> dict[str, dict[str, Any]]:
     """Load field specs from CSV, suitable for ``LLMStep(fields=...)``.
 
     Args:
@@ -232,7 +232,7 @@ def load_fields(
     fm = FieldManager(csv_path)
     if category:
         return fm.get_category_fields(category)
-    all_fields: Dict[str, Dict[str, Any]] = {}
+    all_fields: dict[str, dict[str, Any]] = {}
     for cat in fm.get_categories():
         all_fields.update(fm.get_category_fields(cat))
     return all_fields
