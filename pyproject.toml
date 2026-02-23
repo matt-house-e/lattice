@@ -52,10 +52,10 @@ all = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/lattice-team/lattice-enrichment"
-"Bug Reports" = "https://github.com/lattice-team/lattice-enrichment/issues"
-"Source" = "https://github.com/lattice-team/lattice-enrichment"
-"Documentation" = "https://github.com/lattice-team/lattice-enrichment#readme"
+"Homepage" = "https://github.com/matt-house-e/lattice"
+"Bug Reports" = "https://github.com/matt-house-e/lattice/issues"
+"Source" = "https://github.com/matt-house-e/lattice"
+"Documentation" = "https://github.com/matt-house-e/lattice#readme"
 
 [tool.hatch.version]
 path = "accrue/__init__.py"
