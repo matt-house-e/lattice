@@ -7,8 +7,8 @@ from typing import Any, get_args, get_origin
 import pytest
 from pydantic import ValidationError
 
-from lattice.schemas.field_spec import FieldSpec
-from lattice.steps.schema_builder import (
+from accrue.schemas.field_spec import FieldSpec
+from accrue.steps.schema_builder import (
     _build_description,
     _resolve_type,
     build_json_schema,

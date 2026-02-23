@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from lattice.steps.base import Step, StepContext, StepResult
-from lattice.steps.function import FunctionStep
+from accrue.steps.base import Step, StepContext, StepResult
+from accrue.steps.function import FunctionStep
 
 
 def _make_ctx(**overrides):

@@ -1,4 +1,4 @@
-"""Pipeline execution engine for the Lattice enrichment engine."""
+"""Pipeline execution engine for the Accrue enrichment engine."""
 
 from .pipeline import Pipeline, PipelineResult
 

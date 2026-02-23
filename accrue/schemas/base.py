@@ -1,4 +1,4 @@
-"""Base schema types for the Lattice pipeline."""
+"""Base schema types for the Accrue pipeline."""
 
 from pydantic import BaseModel
 

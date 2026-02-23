@@ -1,6 +1,6 @@
 """Enricher — Checkpoint-capable pipeline runner.
 
-Internal runner for Lattice. Created via ``Pipeline.runner(config)``
+Internal runner for Accrue. Created via ``Pipeline.runner(config)``
 for repeated execution with checkpointing.
 """
 

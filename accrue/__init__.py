@@ -1,4 +1,4 @@
-"""Lattice — Enrichment Pipeline Engine.
+"""Accrue — Enrichment Pipeline Engine.
 
 A programmatic enrichment engine built on composable, column-oriented
 pipeline steps with Pydantic validation, checkpointing, and async concurrency.
@@ -34,8 +34,8 @@ from .schemas.field_spec import FieldSpec
 from .schemas.grounding import GroundingConfig
 from .utils.web_search import web_search
 
-__version__ = "0.5.0"
-__author__ = "Lattice Team"
+__version__ = "1.0.0"
+__author__ = "Accrue Team"
 
 __all__ = [
     # Primary API

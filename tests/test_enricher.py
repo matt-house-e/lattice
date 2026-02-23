@@ -8,10 +8,10 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from lattice.core.config import EnrichmentConfig
-from lattice.core.enricher import Enricher
-from lattice.pipeline.pipeline import Pipeline
-from lattice.steps.function import FunctionStep
+from accrue.core.config import EnrichmentConfig
+from accrue.core.enricher import Enricher
+from accrue.pipeline.pipeline import Pipeline
+from accrue.steps.function import FunctionStep
 
 # -- helpers -----------------------------------------------------------------
 

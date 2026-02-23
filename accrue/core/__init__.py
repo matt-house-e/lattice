@@ -1,4 +1,4 @@
-"""Core functionality for the Lattice enrichment tool."""
+"""Core functionality for the Accrue enrichment tool."""
 
 from .cache import CacheManager
 from .enricher import Enricher

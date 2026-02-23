@@ -156,7 +156,7 @@ class Pipeline:
         config: EnrichmentConfig | None = None,
         hooks: EnrichmentHooks | None = None,
     ) -> PipelineResult:
-        """Synchronous entry point — the ONE way to use Lattice.
+        """Synchronous entry point — the ONE way to use Accrue.
 
         Accepts a DataFrame or ``list[dict]``. Output type matches input type.
 
@@ -289,7 +289,7 @@ class Pipeline:
 
         return Enricher(pipeline=self, config=config)
 
-    def clear_cache(self, step: str | None = None, cache_dir: str = ".lattice") -> int:
+    def clear_cache(self, step: str | None = None, cache_dir: str = ".accrue") -> int:
         """Delete cached step results from the SQLite cache.
 
         Args:

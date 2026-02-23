@@ -1,4 +1,4 @@
-"""Utility modules for the Lattice enrichment engine."""
+"""Utility modules for the Accrue enrichment engine."""
 
 from .web_search import web_search
 

@@ -1,7 +1,7 @@
 """CacheManager — SQLite-backed input-hash cache for pipeline steps.
 
 Per-step-per-row caching with SHA-256 keys. Uses WAL mode for
-concurrent access. Single `.lattice/cache.db` file, zero new deps.
+concurrent access. Single `.accrue/cache.db` file, zero new deps.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ class CacheManager:
         ttl: Time-to-live in seconds. 0 = no expiry.
     """
 
-    def __init__(self, cache_dir: str = ".lattice", ttl: int = 3600) -> None:
+    def __init__(self, cache_dir: str = ".accrue", ttl: int = 3600) -> None:
         self._cache_dir = Path(cache_dir)
         self._ttl = ttl
         self._conn: sqlite3.Connection | None = None

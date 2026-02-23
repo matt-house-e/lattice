@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from lattice.schemas.field_spec import FieldSpec
-from lattice.steps.prompt_builder import (
+from accrue.schemas.field_spec import FieldSpec
+from accrue.steps.prompt_builder import (
     _build_field_specs_xml,
     _build_instructions,
     _detect_used_keys,

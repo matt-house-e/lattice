@@ -1,5 +1,5 @@
 """
-Data handling components for the Lattice enrichment tool.
+Data handling components for the Accrue enrichment tool.
 """
 
 from .fields import FieldManager, load_fields

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from lattice.core.hooks import (
+from accrue.core.hooks import (
     EnrichmentHooks,
     PipelineStartEvent,
     PipelineEndEvent,
@@ -18,8 +18,8 @@ from lattice.core.hooks import (
     RowCompleteEvent,
     _fire_hook,
 )
-from lattice.pipeline.pipeline import Pipeline, PipelineResult
-from lattice.steps.base import StepContext, StepResult
+from accrue.pipeline.pipeline import Pipeline, PipelineResult
+from accrue.steps.base import StepContext, StepResult
 
 # ---------------------------------------------------------------------------
 # _fire_hook unit tests

@@ -1,6 +1,6 @@
 # Accrue - Enrichment Pipeline Engine
 
-> **Rename in progress:** The library is being renamed from Lattice to Accrue (see ADR 013, GitHub Epic #57). Code still uses `lattice/` imports until the rename epic is completed.
+> **Rename complete:** The library was renamed from Lattice to Accrue (see ADR 013, GitHub Epic #57). All code now uses `accrue/` imports.
 
 ## What Accrue Is
 
@@ -22,7 +22,7 @@ NOT row-oriented (that was v0.2). Each step runs across ALL rows before the next
 - **Pipeline is the primary API**: `pipeline.run(df)` is the ONE way to use Accrue. No Enricher in the public API — it's an internal runner.
 - **Fields live on steps**: LLMStep accepts inline field specs. No separate field definition file required. Field spec keys: `prompt`, `type`, `format`, `enum`, `examples`, `bad_examples`, `default` (all optional except `prompt`).
 - **Step protocol**: Async-only `run()` method. No sync/async duplication.
-- **Provider-agnostic via LLMClient protocol**: OpenAI is the default (zero config). Anthropic and Google ship as optional extras (`pip install lattice[anthropic]`, `lattice[google]`). Any provider works via the `LLMClient` protocol (~30-line adapter). No litellm, no LangChain.
+- **Provider-agnostic via LLMClient protocol**: OpenAI is the default (zero config). Anthropic and Google ship as optional extras (`pip install accrue[anthropic]`, `accrue[google]`). Any provider works via the `LLMClient` protocol (~30-line adapter). No litellm, no LangChain.
 - **FunctionStep is the escape hatch**: Any external data source (APIs, web search, databases) is a FunctionStep. No built-in provider steps (no WebSearchStep).
 - **Step data**: `dict[str, Any]` not `pd.Series`. Steps are pure, no pandas.
 - **Internal fields**: `__` prefix (e.g. `__web_context`) for inter-step data, filtered from output.
@@ -43,7 +43,7 @@ NOT row-oriented (that was v0.2). Each step runs across ALL rows before the next
 ### Public API
 
 ```python
-from lattice import Pipeline, LLMStep, FunctionStep, EnrichmentConfig, EnrichmentHooks, web_search
+from accrue import Pipeline, LLMStep, FunctionStep, EnrichmentConfig, EnrichmentHooks, web_search
 
 # Primary: OpenAI (default, zero config, structured outputs auto-enabled)
 pipeline = Pipeline([
@@ -66,12 +66,12 @@ Pipeline([
     LLMStep("analyze", fields={"market_size": "Estimate TAM"}, depends_on=["research"]),
 ])
 
-# Anthropic: pip install lattice[anthropic]
-from lattice.providers import AnthropicClient
+# Anthropic: pip install accrue[anthropic]
+from accrue.providers import AnthropicClient
 LLMStep("analyze", fields={...}, model="claude-sonnet-4-5-20250929", client=AnthropicClient())
 
-# Google: pip install lattice[google]
-from lattice.providers import GoogleClient
+# Google: pip install accrue[google]
+from accrue.providers import GoogleClient
 LLMStep("analyze", fields={...}, model="gemini-2.5-flash", client=GoogleClient())
 
 # OpenAI-compatible (Ollama, Groq, DeepSeek, etc.): base_url shortcut
@@ -94,7 +94,7 @@ LLMStep("research", fields={"summary": "Summarize recent news"}, grounding={
 })
 
 # Grounding works with any provider
-from lattice import GroundingConfig
+from accrue import GroundingConfig
 LLMStep("research", fields={...}, grounding=True, client=AnthropicClient(), model="claude-sonnet-4-5-20250929")
 LLMStep("research", fields={...}, grounding=True, client=GoogleClient(), model="gemini-2.5-flash")
 
@@ -106,7 +106,7 @@ LLMStep("research", fields={...}, grounding={
 
 ### Package Structure
 ```
-lattice/
+accrue/
 ├── steps/          # Step protocol + built-in steps (LLMStep, FunctionStep)
 │   └── providers/  # LLMClient protocol + adapters (OpenAI, Anthropic, Google)
 ├── pipeline/       # DAG resolution + column-oriented execution + run() entry point
@@ -150,7 +150,7 @@ Full design: `@docs/instructions/PIPELINE_DESIGN.md`
 - **Docstring standard**: Google style (Args/Returns/Raises) on all public methods and classes. Attribute sections on dataclasses and Pydantic models.
 - **Error message standard**: State what's wrong, include relevant context (model name, step name), and suggest how to fix it. Preserve existing substrings that tests match against when updating messages.
 - **`fields` parameter types**: `LLMStep` accepts `list[str] | dict[str, str | dict]`; `FunctionStep` accepts `list[str]` only. On all step *instances*, `fields` is always `list[str]` (LLMStep normalizes dicts to a list of names).
-- **Exception exports**: All user-catchable exceptions (`EnrichmentError`, `FieldValidationError`, `StepError`, `PipelineError`, `RowError`) are exported from `lattice.__init__`.
+- **Exception exports**: All user-catchable exceptions (`EnrichmentError`, `FieldValidationError`, `StepError`, `PipelineError`, `RowError`) are exported from `accrue.__init__`.
 
 ## Scale Limits & Sweet Spot
 
@@ -206,7 +206,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 Types: `feat`, `fix`, `docs`, `refactor`, `test`
 
 ### What Gets Committed
-- Source code (`lattice/`), Tests (`tests/`), Examples (`examples/`), Docs (`.md`)
+- Source code (`accrue/`), Tests (`tests/`), Examples (`examples/`), Docs (`.md`)
 - Never: `data/`, `.env`, `.vscode/`, `.idea/`
 
 ## GitHub Issue Standards

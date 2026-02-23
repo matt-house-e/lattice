@@ -1,5 +1,5 @@
 """
-Custom exceptions for the Lattice enrichment tool.
+Custom exceptions for the Accrue enrichment tool.
 
 Provides specific exception types for different failure modes
 with helpful error messages and context.

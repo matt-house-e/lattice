@@ -1,4 +1,4 @@
-"""Anthropic provider adapter — optional extra: pip install lattice[anthropic]."""
+"""Anthropic provider adapter — optional extra: pip install accrue[anthropic]."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from .base import LLMAPIError, LLMResponse
 class AnthropicClient:
     """Adapter for Anthropic's Claude models.
 
-    Requires: pip install lattice[anthropic]
+    Requires: pip install accrue[anthropic]
 
     Supports the ``web_search_20250305`` server tool for grounded responses.
     When web search tools are active, structured outputs via
@@ -29,7 +29,7 @@ class AnthropicClient:
             try:
                 from anthropic import AsyncAnthropic
             except ImportError:
-                raise ImportError("anthropic package required: pip install lattice[anthropic]")
+                raise ImportError("anthropic package required: pip install accrue[anthropic]")
             key = self._api_key or os.environ.get("ANTHROPIC_API_KEY")
             self._client = AsyncAnthropic(api_key=key)
         return self._client
@@ -127,7 +127,7 @@ class AnthropicClient:
 
 
 def _translate_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Translate generic Lattice tool dicts to Anthropic server tool format."""
+    """Translate generic Accrue tool dicts to Anthropic server tool format."""
     anthropic_tools: list[dict[str, Any]] = []
     for tool in tools:
         if tool.get("type") == "web_search":

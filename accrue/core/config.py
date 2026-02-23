@@ -1,5 +1,5 @@
 """
-Unified configuration for the Lattice enrichment tool.
+Unified configuration for the Accrue enrichment tool.
 
 Defaults are tuned for fast processing on OpenAI Tier 2+ accounts.
 For Tier 1 accounts, reduce max_workers to 5-10.
@@ -77,7 +77,7 @@ class EnrichmentConfig:
     cache_ttl: int = 3600
     """Cache time-to-live in seconds."""
 
-    cache_dir: str = ".lattice"
+    cache_dir: str = ".accrue"
     """Directory for cache.db."""
 
     checkpoint_interval: int = 0

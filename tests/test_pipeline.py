@@ -7,10 +7,10 @@ from typing import Any
 
 import pytest
 
-from lattice.core.exceptions import PipelineError
-from lattice.pipeline.pipeline import Pipeline
-from lattice.steps.base import StepContext, StepResult
-from lattice.steps.function import FunctionStep
+from accrue.core.exceptions import PipelineError
+from accrue.pipeline.pipeline import Pipeline
+from accrue.steps.base import StepContext, StepResult
+from accrue.steps.function import FunctionStep
 
 # -- helpers -------------------------------------------------------------
 
@@ -215,7 +215,7 @@ class TestPipelineExecution:
     @pytest.mark.asyncio
     async def test_config_max_workers(self):
         """Verify semaphore uses config.max_workers."""
-        from lattice.core.config import EnrichmentConfig
+        from accrue.core.config import EnrichmentConfig
 
         call_count = 0
 
@@ -279,8 +279,8 @@ class TestCostAggregation:
     @pytest.mark.asyncio
     async def test_cost_from_step_with_usage(self):
         """Step that returns usage info gets aggregated."""
-        from lattice.schemas.base import UsageInfo
-        from lattice.steps.base import StepResult
+        from accrue.schemas.base import UsageInfo
+        from accrue.steps.base import StepResult
 
         class UsageStep:
             name = "llm_mock"

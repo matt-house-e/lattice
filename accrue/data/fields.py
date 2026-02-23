@@ -1,4 +1,4 @@
-"""Field management for the Lattice enrichment tool.
+"""Field management for the Accrue enrichment tool.
 
 Loads field categories and specifications from CSV files, producing dicts
 compatible with :class:`~lattice.schemas.field_spec.FieldSpec` and
@@ -225,7 +225,7 @@ def load_fields(
 
     Example::
 
-        from lattice.data import load_fields
+        from accrue.data import load_fields
         fields = load_fields("fields.csv", category="business_analysis")
         pipeline = Pipeline([LLMStep("analyze", fields=fields)])
     """

@@ -1,4 +1,4 @@
-"""Enrichment schema types for the Lattice pipeline."""
+"""Enrichment schema types for the Accrue pipeline."""
 
 from pydantic import BaseModel, ConfigDict
 

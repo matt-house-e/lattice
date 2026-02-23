@@ -5,7 +5,7 @@ common two-step research-then-analyze pattern from ~30 lines to 3.
 
 Example::
 
-    from lattice import Pipeline, FunctionStep, LLMStep, web_search
+    from accrue import Pipeline, FunctionStep, LLMStep, web_search
 
     Pipeline([
         FunctionStep("research",

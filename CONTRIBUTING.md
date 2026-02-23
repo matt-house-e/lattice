@@ -1,6 +1,6 @@
-# Contributing to Lattice
+# Contributing to Accrue
 
-Thank you for your interest in contributing to Lattice! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Accrue! This document provides guidelines and information for contributors.
 
 ## Development Setup
 
@@ -12,8 +12,8 @@ Thank you for your interest in contributing to Lattice! This document provides g
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/your-username/lattice.git
-   cd lattice
+   git clone https://github.com/your-username/accrue.git
+   cd accrue
    ```
 
 2. **Create a virtual environment:**
@@ -61,11 +61,11 @@ Thank you for your interest in contributing to Lattice! This document provides g
    python -m pytest tests/
    
    # Run code formatting
-   black lattice tests
-   isort lattice tests
+   black accrue tests
+   isort accrue tests
    
    # Run type checking
-   mypy lattice
+   mypy accrue
    ```
 
 4. **Commit your changes:**
@@ -136,8 +136,8 @@ git commit -m "docs: update API documentation"
 ## Project Structure
 
 ```
-lattice/
-├── lattice/           # Main package
+accrue/
+├── accrue/           # Main package
 │   ├── core/         # Enricher, config, checkpoint, exceptions
 │   ├── steps/        # Step protocol + built-in steps (LLMStep, FunctionStep)
 │   ├── pipeline/     # DAG resolution + column-oriented execution
@@ -157,7 +157,7 @@ lattice/
 python -m pytest
 
 # Run with coverage
-python -m pytest --cov=lattice
+python -m pytest --cov=accrue
 
 # Run specific test file
 python -m pytest tests/test_enricher.py
@@ -198,4 +198,4 @@ All submissions require code review. We use GitHub pull requests for this purpos
 - [ ] Performance implications considered
 - [ ] Security implications considered
 
-Thank you for contributing to Lattice!
+Thank you for contributing to Accrue!

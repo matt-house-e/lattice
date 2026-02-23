@@ -1,3 +1,3 @@
 """
-Tests for the Lattice enrichment tool.
+Tests for the Accrue enrichment tool.
 """

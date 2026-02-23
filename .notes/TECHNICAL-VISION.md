@@ -1,4 +1,4 @@
-# Lattice Technical Vision & Architecture
+# Accrue Technical Vision & Architecture
 
 **Last Updated:** 2026-02-21 (Phase 6B conditional steps complete)
 
@@ -6,7 +6,7 @@
 
 ## TL;DR
 
-Lattice evolves from simple row-by-row enrichment to a **knowledge synthesis engine** through five dimensions:
+Accrue evolves from simple row-by-row enrichment to a **knowledge synthesis engine** through five dimensions:
 1. **Provenance & Trust** - Every value has sources and confidence
 2. **Cross-Row Intelligence** - Dataset-aware enrichment
 3. **Knowledge Graph** - Extract entity relationships
@@ -28,7 +28,7 @@ The engine provides **primitives**. Products (Lead Scorer, Shortlist) compose th
 │         └────────────────┼───────────────────────┘              │
 │                          ▼                                      │
 │  ┌───────────────────────────────────────────────────────────┐ │
-│  │                  LATTICE ENGINE (OSS)                      │ │
+│  │                  ACCRUE ENGINE (OSS)                       │ │
 │  │                                                            │ │
 │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐  │ │
 │  │  │ Enricher │ │ Sources  │ │ Output   │ │   Hooks &    │  │ │
@@ -282,7 +282,7 @@ pipeline = Pipeline([
 result = pipeline.run(df, config=EnrichmentConfig(
     enable_caching=True,
     cache_ttl=86400,          # 24 hours
-    cache_dir=".lattice",     # cache.db location
+    cache_dir=".accrue",     # cache.db location
 ))
 # Cache stats in result
 result.cost.steps["analyze"].cache_hit_rate  # 0.95
@@ -353,13 +353,13 @@ def test_enrichment_accuracy():
 ### Ship: Minimum Viable Distribution (Phase 5A)
 7. **Working examples** - 3-4 runnable scripts with sample data (including web search pattern)
 8. **README rewrite** - Real examples, install instructions, quick start
-9. **PyPI publish** - `pip install lattice-enrichment`
+9. **PyPI publish** - `pip install accrue`
 
 ### Power User Features (Phase 5B)
 10. **Lifecycle hooks** (#30) - Callbacks at pipeline/step/row boundaries for observability tools
 11. **Prompt customization** (#34) - Three-tier: default, header injection, full override
 12. **Web search utility** (#35) - Convenience function for common two-step pattern
-13. **CLI** - `lattice run --csv data.csv --fields fields.csv`
+13. **CLI** - `accrue run --csv data.csv --fields fields.csv`
 
 ### Differentiation (Post-launch)
 14. **Provenance/sources** - Source attribution per field (#12)
@@ -379,7 +379,7 @@ def test_enrichment_accuracy():
 - **LLMClient protocol + shipped adapters.** OpenAI default, Anthropic/Google as optional extras (~30 lines each). No litellm (too heavy).
 - **No langfuse/eval tooling.** Expose hooks; users bring their own observability.
 - **No waterfall resolution.** Source priority is user logic, not framework logic.
-- **Evals are user-level.** Lattice exposes data. Users evaluate correctness.
+- **Evals are user-level.** Accrue exposes data. Users evaluate correctness.
 - **Default model: gpt-4.1-mini.** Nano too limited for enrichment (no web search, hallucination risk with structured outputs). Mini matches GPT-4o at 83% cheaper. Users can override per-step.
 - **7-key field spec.** `prompt`, `type`, `format`, `enum`, `examples`, `bad_examples`, `default`. Research-backed from Clay, Instructor, and OpenAI cookbook analysis.
 - **Dynamic system prompt.** Markdown headers + XML data boundaries (OpenAI GPT-4.1 cookbook pattern). Only describes keys actually used. JSON in prompts avoided (performed poorly in OpenAI testing).
@@ -391,26 +391,26 @@ def test_enrichment_accuracy():
 
 **Sweet spot: 100 to 50,000 rows.** Primary use case: 1,000-10,000.
 
-Lattice is single-process, in-memory (pandas), async. The bottleneck is almost always API rate limits and cost, not Lattice. With Tier 5 rate limits, Lattice processes 50K rows across 3 steps in under an hour.
+Accrue is single-process, in-memory (pandas), async. The bottleneck is almost always API rate limits and cost, not Accrue. With Tier 5 rate limits, Accrue processes 50K rows across 3 steps in under an hour.
 
-**Users outgrow Lattice when:**
+**Users outgrow Accrue when:**
 - **>50K-100K rows regularly** — need distributed processing (Spark, Ray, Prefect workers)
-- **Real-time/streaming** — Lattice is batch-only
+- **Real-time/streaming** — Accrue is batch-only
 - **Multi-machine** — need distributed workers, not single-process asyncio
 - **Complex orchestration** — loops, human-in-the-loop → Prefect/Dagster (note: basic conditional branching is now supported via `run_if`/`skip_if`)
 - **Data exceeds memory** — >10GB DataFrames → Dask/Polars/Spark
 
-This is intentional positioning: Lattice fills the gap between Instructor (single LLM call, 1-100 rows) and enterprise data infrastructure (Spark/Prefect/Airflow, 100K+ rows). Caching + checkpointing make the 1K-50K range viable for iterative development.
+This is intentional positioning: Accrue fills the gap between Instructor (single LLM call, 1-100 rows) and enterprise data infrastructure (Spark/Prefect/Airflow, 100K+ rows). Caching + checkpointing make the 1K-50K range viable for iterative development.
 
 **Scale extensions (post-launch):**
 - **Chunked execution** (`chunk_size=5000`): Process N rows at a time, cache carries across chunks. Extends ceiling to ~500K rows without going distributed.
 - **`list[dict]` input** (Phase 4): Skip pandas conversion. Serves server contexts and Polars users.
-- **pandas stays required**: 77% of data practitioners use pandas. Lattice's users are pandas users. No native Polars — `list[dict]` covers the gap.
+- **pandas stays required**: 77% of data practitioners use pandas. Accrue's users are pandas users. No native Polars — `list[dict]` covers the gap.
 
 ## The Pitch Evolution
 
 **Today (v0.4):**
-> "Lattice is a composable pipeline engine for enriching DataFrames with LLMs"
+> "Accrue is a composable pipeline engine for enriching DataFrames with LLMs"
 
 **After Phase 2:**
 > "...that handles the hard parts: retries, error recovery, cost tracking, and concurrency"

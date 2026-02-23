@@ -1,13 +1,13 @@
 # API Reference
 
-Detailed documentation for Lattice's core components.
+Detailed documentation for Accrue's core components.
 
 ## Enricher
 
 The main orchestrator for DataFrame enrichment. Validates field routing, manages per-step checkpoints, and provides sync/async DataFrame APIs.
 
 ```python
-from lattice import Enricher, Pipeline, FieldManager
+from accrue import Enricher, Pipeline, FieldManager
 
 enricher = Enricher(
     pipeline=pipeline,
@@ -51,7 +51,7 @@ At `run()` time, the Enricher validates:
 DAG-based execution engine. Resolves step dependencies via topological sort and executes level-by-level.
 
 ```python
-from lattice import Pipeline, LLMStep, FunctionStep
+from accrue import Pipeline, LLMStep, FunctionStep
 
 pipeline = Pipeline([
     FunctionStep("search", fn=search_fn, fields=["__web_ctx"]),
@@ -96,7 +96,7 @@ Within each step, rows are processed concurrently (bounded by `config.max_worker
 Calls an OpenAI-compatible chat model to produce enrichment values. Uses `response_format={"type": "json_object"}` and validates responses with Pydantic.
 
 ```python
-from lattice import LLMStep
+from accrue import LLMStep
 
 step = LLMStep(
     name="analyze",
@@ -160,7 +160,7 @@ Unknown keys are rejected at construction time (`extra="forbid"`).
 Wraps any sync or async callable as a pipeline step. The escape hatch for APIs, databases, and custom logic.
 
 ```python
-from lattice import FunctionStep
+from accrue import FunctionStep
 
 def lookup_funding(ctx):
     company = ctx.row.get("name")
@@ -190,7 +190,7 @@ step = FunctionStep(
 The interface all steps must satisfy. Uses `typing.Protocol` for duck typing — no inheritance required.
 
 ```python
-from lattice import Step, StepContext, StepResult
+from accrue import Step, StepContext, StepResult
 
 @runtime_checkable
 class Step(Protocol):
@@ -229,7 +229,7 @@ Output from a single step execution.
 Loads field definitions from CSV. Provides category-based access to field specs.
 
 ```python
-from lattice import FieldManager
+from accrue import FieldManager
 
 fm = FieldManager.from_csv("field_categories.csv")
 
@@ -254,7 +254,7 @@ fields = fm.get_category_fields("business_analysis")  # {"market_size": {...}, .
 Configuration dataclass with factory presets.
 
 ```python
-from lattice import EnrichmentConfig
+from accrue import EnrichmentConfig
 
 config = EnrichmentConfig(
     max_workers=30,             # Tier 2+ accounts
@@ -270,8 +270,8 @@ See [Configuration Guide](configuration.md) for all options and presets.
 ## Error Handling
 
 ```python
-from lattice import EnrichmentError, FieldValidationError
-from lattice.core.exceptions import StepError, PipelineError
+from accrue import EnrichmentError, FieldValidationError
+from accrue.core.exceptions import StepError, PipelineError
 
 try:
     result = enricher.run(df, "business_analysis")
@@ -289,7 +289,7 @@ except EnrichmentError as e:
 
 | Exception | When Raised |
 |-----------|-------------|
-| `EnrichmentError` | Base exception for all Lattice errors |
+| `EnrichmentError` | Base exception for all Accrue errors |
 | `FieldValidationError` | Invalid field definition, missing category, or field routing error |
 | `StepError` | A step failed after exhausting retries |
 | `PipelineError` | Duplicate names, missing dependencies, or cycles in pipeline |
@@ -305,7 +305,7 @@ Pydantic models used for LLM response validation.
 Dynamic container for validated LLM responses. Accepts any fields.
 
 ```python
-from lattice.schemas import EnrichmentResult
+from accrue.schemas import EnrichmentResult
 
 result = EnrichmentResult(market_size="$50B", competition_level="High")
 print(result.model_dump())  # {"market_size": "$50B", "competition_level": "High"}
@@ -316,7 +316,7 @@ print(result.model_dump())  # {"market_size": "$50B", "competition_level": "High
 Strict Pydantic model for the 7-key field specification. Used internally by LLMStep; also available for direct validation.
 
 ```python
-from lattice import FieldSpec
+from accrue import FieldSpec
 
 spec = FieldSpec(prompt="Estimate TAM", type="Number", format="$X.XB")
 spec.model_dump(exclude_none=True)  # {"prompt": "Estimate TAM", "type": "Number", "format": "$X.XB"}

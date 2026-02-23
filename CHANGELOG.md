@@ -30,14 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - System prompt ported from v0.2 `LLMChain` to `LLMStep` default prompt (~50 lines of enrichment-specific prompt engineering)
 
 ### Removed
-- `lattice/chains/` module (LLMChain, WebEnrichedLLMChain) — replaced by `lattice/steps/`
-- `lattice/vector_store/` module (FAISS, document processing) — dead code
-- `lattice/core/processors.py` (RowProcessor) — replaced by `lattice/pipeline/`
+- `accrue/chains/` module (LLMChain, WebEnrichedLLMChain) — replaced by `accrue/steps/`
+- `accrue/vector_store/` module (FAISS, document processing) — dead code
+- `accrue/core/processors.py` (RowProcessor) — replaced by `accrue/pipeline/`
 - LangChain dependencies (`langchain`, `langchain-core`, `langchain-openai`)
 - `tenacity` dependency (retry logic now built into LLMStep)
 - `tavily-python` dependency (web search deferred to Phase 2)
 - Vector store optional dependencies (`faiss-cpu`, `pymupdf`)
-- CLI entry point (`lattice-enrich`) — no CLI module exists yet
+- CLI entry point (`accrue-enrich`) — no CLI module exists yet
 
 ### Fixed
 - `fields.py` examples column bug: position-based `df.columns[5:]` slicing replaced with name-based `KNOWN_COLUMNS` exclusion to prevent V2 CSV columns leaking into examples
@@ -50,13 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ```python
 # v0.2
-from lattice import TableEnricher, LLMChain, FieldManager
+from accrue import TableEnricher, LLMChain, FieldManager
 chain = LLMChain.openai(api_key="sk-...")
 enricher = TableEnricher(chain=chain, field_manager=fm)
 result = enricher.enrich_dataframe(df, category="business_analysis")
 
 # v0.3
-from lattice import Enricher, Pipeline, LLMStep, FieldManager
+from accrue import Enricher, Pipeline, LLMStep, FieldManager
 pipeline = Pipeline([LLMStep("analyze", fields=["market_size", "competition_level"])])
 enricher = Enricher(pipeline=pipeline, field_manager=fm)
 result = enricher.run(df, category="business_analysis")

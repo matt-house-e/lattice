@@ -3,10 +3,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "lattice-enrichment"
-version = "0.4.0"
+name = "accrue"
+version = "1.0.0"
 authors = [
-  { name="Lattice Team", email="team@lattice.dev" },
+  { name="Accrue Team", email="team@accrue.dev" },
 ]
 description = "A composable pipeline engine for structured data enrichment using LLMs"
 readme = "README.md"
@@ -46,27 +46,27 @@ dev = [
     "ipykernel>=6.0",
 ]
 all = [
-    "lattice-enrichment[anthropic]",
-    "lattice-enrichment[google]",
-    "lattice-enrichment[dev]",
+    "accrue[anthropic]",
+    "accrue[google]",
+    "accrue[dev]",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/lattice-team/lattice-enrichment"
-"Bug Reports" = "https://github.com/lattice-team/lattice-enrichment/issues"
-"Source" = "https://github.com/lattice-team/lattice-enrichment"
-"Documentation" = "https://github.com/lattice-team/lattice-enrichment#readme"
+"Homepage" = "https://github.com/matt-house-e/lattice"
+"Bug Reports" = "https://github.com/matt-house-e/lattice/issues"
+"Source" = "https://github.com/matt-house-e/lattice"
+"Documentation" = "https://github.com/matt-house-e/lattice#readme"
 
 [tool.hatch.version]
-path = "lattice/__init__.py"
+path = "accrue/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["lattice"]
+packages = ["accrue"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "lattice/",
-    "lattice/py.typed",
+    "accrue/",
+    "accrue/py.typed",
     "tests/",
     "examples/",
     "docs/",

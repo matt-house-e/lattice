@@ -1,11 +1,11 @@
 # Prompt Engineering Research
 
 > **Date**: February 2026
-> **Context**: Research for Lattice field spec redesign and system prompt overhaul
+> **Context**: Research for Accrue field spec redesign and system prompt overhaul
 
 ## Summary
 
-Research across OpenAI cookbook, Clay, Instructor, LangExtract, and structured extraction best practices to inform how Lattice structures field specifications and builds LLM prompts.
+Research across OpenAI cookbook, Clay, Instructor, LangExtract, and structured extraction best practices to inform how Accrue structures field specifications and builds LLM prompts.
 
 ---
 
@@ -63,7 +63,7 @@ For Nano: flatter schemas and simpler prompts are critical. Structured outputs m
 
 ### json_object (legacy)
 
-OpenAI now considers `response_format: {"type": "json_object"}` to be legacy. It only guarantees syntactically valid JSON, not schema adherence. **This is what Lattice currently uses.**
+OpenAI now considers `response_format: {"type": "json_object"}` to be legacy. It only guarantees syntactically valid JSON, not schema adherence. **This is what Accrue currently uses.**
 
 ### json_schema + strict: true (recommended)
 
@@ -204,7 +204,7 @@ extraction = client.responses.create(
 )
 ```
 
-### Lattice integration
+### Accrue integration
 
 Maps perfectly to FunctionStep (search) → LLMStep (extract):
 ```python

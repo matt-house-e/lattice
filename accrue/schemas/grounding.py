@@ -35,7 +35,7 @@ class GroundingConfig(BaseModel):
             to the native tool configuration.  Useful for options that only
             one provider supports (e.g. OpenAI ``search_context_size``,
             Google ``dynamic_retrieval_config``).  These are merged into the
-            provider's tool dict after Lattice's own field mappings.
+            provider's tool dict after Accrue's own field mappings.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -52,7 +52,7 @@ class Citation:
     """A normalised source citation from a grounded LLM response.
 
     Provider adapters translate their native citation formats into this
-    common representation.  Lattice injects these under the ``sources_field``
+    common representation.  Accrue injects these under the ``sources_field``
     name on the step result (default ``"sources"``, visible in output).
     Set ``sources_field=None`` on LLMStep to disable citation injection.
 

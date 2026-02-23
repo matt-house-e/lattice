@@ -1,4 +1,4 @@
-"""Step protocol and data classes for the Lattice pipeline."""
+"""Step protocol and data classes for the Accrue pipeline."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Composable pipeline steps for the Lattice enrichment engine."""
+"""Composable pipeline steps for the Accrue enrichment engine."""
 
 from .base import Step, StepContext, StepResult
 from .function import FunctionStep
